@@ -37,8 +37,9 @@ if [[ ! -f "$BIN_PATH" ]]; then
 fi
 
 echo "📦 Installing binary to $INSTALL_DIR/chargecap..."
-cp -f "$BIN_PATH" "$INSTALL_DIR/chargecap"
-chmod 755 "$INSTALL_DIR/chargecap"
+rm -f "$INSTALL_DIR/chargecap"
+install -m 755 "$BIN_PATH" "$INSTALL_DIR/chargecap"
+codesign --force --sign - "$INSTALL_DIR/chargecap" 2>/dev/null || true
 
 echo "⚙️  Configuring LaunchDaemon..."
 "$INSTALL_DIR/chargecap" install

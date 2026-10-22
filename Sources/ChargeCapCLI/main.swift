@@ -192,21 +192,34 @@ func handleInstall() {
     let plistPath = "/Library/LaunchDaemons/com.wixe.chargecap.plist"
     do {
         try plistContent.write(toFile: plistPath, atomically: true, encoding: .utf8)
-        _ = Process.launchedProcess(launchPath: "/bin/chmod", arguments: ["644", plistPath])
+        let chmod = Process()
+        chmod.executableURL = URL(fileURLWithPath: "/bin/chmod")
+        chmod.arguments = ["644", plistPath]
+        try? chmod.run()
+        chmod.waitUntilExit()
         
         // Bootout existing if present
         let bootout = Process()
-        bootout.launchPath = "/bin/launchctl"
-        bootout.arguments = ["bootout", "system", plistPath]
+        bootout.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        bootout.arguments = ["bootout", "system/com.wixe.chargecap"]
         try? bootout.run()
         bootout.waitUntilExit()
         
+        Thread.sleep(forTimeInterval: 0.3)
+        
         // Bootstrap new
         let bootstrap = Process()
-        bootstrap.launchPath = "/bin/launchctl"
+        bootstrap.executableURL = URL(fileURLWithPath: "/bin/launchctl")
         bootstrap.arguments = ["bootstrap", "system", plistPath]
-        try bootstrap.run()
+        try? bootstrap.run()
         bootstrap.waitUntilExit()
+        
+        // Ensure running daemon is restarted with new binary
+        let kickstart = Process()
+        kickstart.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        kickstart.arguments = ["kickstart", "-k", "system/com.wixe.chargecap"]
+        try? kickstart.run()
+        kickstart.waitUntilExit()
         
         print("✅ ChargeCap LaunchDaemon installed and bootstrapped successfully!")
         print("   Daemon is running 24/7 as root: \(plistPath)")
