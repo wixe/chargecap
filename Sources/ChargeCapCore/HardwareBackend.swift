@@ -109,6 +109,9 @@ public class HardwareBackend {
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: path)
                 process.arguments = ["limit", "\(clamped)"]
+                let pipe = Pipe()
+                process.standardOutput = pipe
+                process.standardError = pipe
                 do {
                     try process.run()
                     process.waitUntilExit()
