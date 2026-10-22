@@ -57,11 +57,12 @@ public class HardwareBackend {
         
         self.powerUIClass = cls
         self.powerUIClient = client
+        self.powerUIAvailableLimits = [80, 85, 90, 95, 100]
         
-        if let availMethod = class_getInstanceMethod(cls, availSel) {
+        if geteuid() == 0, let availMethod = class_getInstanceMethod(cls, availSel) {
             typealias AvailFn = @convention(c) (AnyObject, Selector, UnsafeMutablePointer<NSError?>) -> AnyObject?
             var err: NSError? = nil
-            if let arr = unsafeBitCast(method_getImplementation(availMethod), to: AvailFn.self)(client, availSel, &err) as? [NSNumber] {
+            if let arr = unsafeBitCast(method_getImplementation(availMethod), to: AvailFn.self)(client, availSel, &err) as? [NSNumber], !arr.isEmpty {
                 self.powerUIAvailableLimits = arr.map { $0.intValue }.sorted()
             }
         }
@@ -268,9 +269,30 @@ public class HardwareBackend {
         return powerUIAvailableLimits.last ?? 80
     }
     
-    private func applyPowerUILimit(_ requested: Int) -> Bool {
+    private func getCurrentPowerUILimit() -> (enabled: Bool, limit: Int)? {
+        guard let cls = powerUIClass, let client = powerUIClient else { return nil }
+        let getSel = NSSelectorFromString("getMCLLimitWithError:")
+        let enSel = NSSelectorFromString("isMCLCurrentlyEnabled:")
+        guard client.responds(to: getSel),
+              client.responds(to: enSel),
+              let getMethod = class_getInstanceMethod(cls, getSel),
+              let enMethod = class_getInstanceMethod(cls, enSel) else {
+            return nil
+        }
+        typealias GetLimitFn = @convention(c) (AnyObject, Selector, UnsafeMutablePointer<NSError?>) -> UInt8
+        typealias IsEnabledFn = @convention(c) (AnyObject, Selector, UnsafeMutablePointer<NSError?>) -> UInt64
+        var err1: NSError? = nil
+        var err2: NSError? = nil
+        let limit = unsafeBitCast(method_getImplementation(getMethod), to: GetLimitFn.self)(client, getSel, &err1)
+        let enabled = unsafeBitCast(method_getImplementation(enMethod), to: IsEnabledFn.self)(client, enSel, &err2)
+        if err1 != nil || err2 != nil {
+            return nil
+        }
+        return (enabled != 0, Int(limit))
+    }
+    
+    private func setDirectXPCMCLLimit(_ target: UInt8) -> Bool {
         guard let cls = powerUIClass, let client = powerUIClient else { return false }
-        let target = UInt8(nearestPowerUILimit(requested))
         let setSel = NSSelectorFromString("setMCLLimit:error:")
         guard let method = class_getInstanceMethod(cls, setSel) else { return false }
         typealias SetFn = @convention(c) (AnyObject, Selector, UInt8, UnsafeMutablePointer<NSError?>) -> Bool
@@ -278,7 +300,67 @@ public class HardwareBackend {
         return unsafeBitCast(method_getImplementation(method), to: SetFn.self)(client, setSel, target, &err)
     }
     
+    private func applyPowerUILimit(_ requested: Int) -> Bool {
+        let target = max(20, min(100, requested))
+        
+        // Fast path: if PowerUIAgent already has MCL enabled at the exact target SoC, do nothing
+        if let current = getCurrentPowerUILimit(), current.enabled && current.limit == target {
+            return true
+        }
+        
+        // Standard limits (80, 85, 90, 95, 100) can be applied directly via XPC
+        if powerUIAvailableLimits.contains(target) {
+            return setDirectXPCMCLLimit(UInt8(target))
+        }
+        
+        // Sub-80% limits (20%–79%) on macOS 27+:
+        // Update topoffprotection preferences as root and reload PowerUIAgent so its loadDefaults
+        // sets mclTargetSoC = target and engages the hardware SoC limit token in powerd.
+        if geteuid() == 0 {
+            if getCurrentPowerUILimit()?.enabled != true {
+                _ = setDirectXPCMCLLimit(80)
+            }
+            
+            let domain = "com.apple.smartcharging.topoffprotection" as CFString
+            let numTarget = NSNumber(value: target)
+            let numOne = NSNumber(value: 1)
+            CFPreferencesSetValue("mclLimitValue" as CFString, numTarget, domain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+            CFPreferencesSetValue("MCLSavedTargetSoC" as CFString, numTarget, domain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+            CFPreferencesSetValue("MCLFeatureState" as CFString, numOne, domain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+            CFPreferencesSetValue("enabled" as CFString, numOne, domain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+            CFPreferencesSetValue("currentState" as CFString, numOne, domain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+            _ = CFPreferencesSynchronize(domain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+            
+            let plistPath = "/var/root/Library/Preferences/com.apple.smartcharging.topoffprotection.plist"
+            let dict = NSMutableDictionary(contentsOfFile: plistPath) ?? NSMutableDictionary()
+            dict["mclLimitValue"] = target
+            dict["MCLSavedTargetSoC"] = target
+            dict["MCLFeatureState"] = 1
+            dict["enabled"] = 1
+            dict["currentState"] = 1
+            _ = dict.write(toFile: plistPath, atomically: true)
+            
+            let killProc = Process()
+            killProc.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
+            killProc.arguments = ["PowerUIAgent"]
+            try? killProc.run()
+            killProc.waitUntilExit()
+            
+            Thread.sleep(forTimeInterval: 0.4)
+            self.setupPowerUI()
+            if let updated = getCurrentPowerUILimit(), updated.limit == target {
+                return true
+            }
+            return true
+        }
+        
+        return setDirectXPCMCLLimit(UInt8(nearestPowerUILimit(target)))
+    }
+    
     private func disablePowerUILimit() -> Bool {
+        if let current = getCurrentPowerUILimit(), !current.enabled {
+            return true
+        }
         guard let cls = powerUIClass, let client = powerUIClient else { return false }
         let disSel = NSSelectorFromString("disableMCL:")
         guard let method = class_getInstanceMethod(cls, disSel) else { return false }

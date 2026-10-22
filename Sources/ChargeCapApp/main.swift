@@ -21,6 +21,7 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
     private var uninstallDaemonButton: NSButton?
     
     private let monitor = BatteryMonitor()
+    private lazy var fallbackHardware = HardwareBackend()
     private let launchAgentPath: String = {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         return "\(home)/Library/LaunchAgents/com.wixe.chargecap.app.plist"
@@ -60,27 +61,25 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
     
-    private func isDaemonRunning() -> Bool {
-        return UnixSocketClient.send("STATUS") != nil
-    }
-    
-    private func fetchGovernorMode() -> String {
+    private func fetchDaemonStatus() -> (running: Bool, mode: String, backend: String?) {
         if let liveJson = UnixSocketClient.send("STATUS"),
            let data = liveJson.data(using: .utf8),
            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let gov = obj["governor"] as? [String: Any],
            let mode = gov["mode"] as? String {
-            return mode
+            let backend = gov["backend"] as? String
+            return (true, mode, backend)
         }
-        return "Daemon Not Installed"
+        return (false, "Daemon Not Installed", nil)
     }
     
     private func rebuildMenu() {
         let status = monitor.getCurrentStatus()
         let cfg = ConfigManager.shared.load()
-        let hw = HardwareBackend()
-        let daemonActive = isDaemonRunning()
-        let govMode = fetchGovernorMode()
+        let daemonInfo = fetchDaemonStatus()
+        let daemonActive = daemonInfo.running
+        let govMode = daemonInfo.mode
+        let backendName = daemonInfo.backend ?? fallbackHardware.modeName
         
         let iconPrefix = status.isCharging ? "⚡" : (status.isACConnected ? "🔌" : "🔋")
         statusItem.button?.title = "\(iconPrefix) \(status.percent)% → \(cfg.targetLimit)%"
@@ -100,7 +99,7 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
             "Governor: \(govMode)",
             "Power: \(wattageStr) • \(status.voltageMV) mV • \(status.amperageMA) mA",
             "Health: \(status.healthPercent)% (\(status.cycleCount) cycles) • \(status.thermalState)",
-            "Backend: \(hw.modeName)"
+            "Backend: \(backendName)"
         ]
         for line in infoLines {
             let item = NSMenuItem(title: "  " + line, action: nil, keyEquivalent: "")
@@ -161,6 +160,9 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
             installItem.target = self
             menu.addItem(installItem)
         } else {
+            let updateItem = NSMenuItem(title: "Update / Restart Background Daemon…", action: #selector(installDaemonAction), keyEquivalent: "")
+            updateItem.target = self
+            menu.addItem(updateItem)
             let uninstallItem = NSMenuItem(title: "Uninstall Background Daemon…", action: #selector(uninstallDaemonAction), keyEquivalent: "")
             uninstallItem.target = self
             menu.addItem(uninstallItem)
@@ -286,8 +288,9 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
         guard settingsWindow != nil else { return }
         let status = monitor.getCurrentStatus()
         let cfg = ConfigManager.shared.load()
-        let daemonActive = isDaemonRunning()
-        let govMode = fetchGovernorMode()
+        let daemonInfo = fetchDaemonStatus()
+        let daemonActive = daemonInfo.running
+        let govMode = daemonInfo.mode
         
         daemonBadgeLabel?.stringValue = daemonActive
             ? "✅ Background Daemon Active (/var/run/chargecap.sock)"
