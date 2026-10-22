@@ -92,6 +92,13 @@ public final class UnixSocketServer {
     private func handleClient(_ clientFD: Int32) {
         defer { close(clientFD) }
         
+        // Prevent SIGPIPE if client disconnects early, and enforce 500ms read/write timeouts
+        var noSigPipe: Int32 = 1
+        setsockopt(clientFD, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
+        var timeout = timeval(tv_sec: 0, tv_usec: 500_000)
+        setsockopt(clientFD, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+        setsockopt(clientFD, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+        
         var euid: uid_t = 65534
         var egid: gid_t = 65534
         let credOK = (getpeereid(clientFD, &euid, &egid) == 0)
