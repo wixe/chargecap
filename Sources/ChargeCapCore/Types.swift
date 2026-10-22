@@ -57,33 +57,68 @@ public struct BatteryStatus: Codable {
 
 public struct GovernorConfig: Codable, Equatable {
     public var targetLimit: Int
-    public var sailingEnabled: Bool
-    public var sailingDelta: Int
+    public var deadbandEnabled: Bool
+    public var deadbandDelta: Int
     public var thermalProtectionEnabled: Bool
     public var autoServerMode: Bool
     public var pollIntervalSeconds: Double
     
+    enum CodingKeys: String, CodingKey {
+        case targetLimit
+        case deadbandEnabled
+        case deadbandDelta
+        case sailingEnabled
+        case sailingDelta
+        case thermalProtectionEnabled
+        case autoServerMode
+        case pollIntervalSeconds
+    }
+    
     public init(
         targetLimit: Int,
-        sailingEnabled: Bool,
-        sailingDelta: Int,
+        deadbandEnabled: Bool,
+        deadbandDelta: Int,
         thermalProtectionEnabled: Bool,
         autoServerMode: Bool,
         pollIntervalSeconds: Double
     ) {
         self.targetLimit = targetLimit
-        self.sailingEnabled = sailingEnabled
-        self.sailingDelta = sailingDelta
+        self.deadbandEnabled = deadbandEnabled
+        self.deadbandDelta = deadbandDelta
         self.thermalProtectionEnabled = thermalProtectionEnabled
         self.autoServerMode = autoServerMode
         self.pollIntervalSeconds = pollIntervalSeconds
     }
     
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.targetLimit = try c.decodeIfPresent(Int.self, forKey: .targetLimit) ?? 50
+        self.deadbandEnabled = try c.decodeIfPresent(Bool.self, forKey: .deadbandEnabled)
+            ?? c.decodeIfPresent(Bool.self, forKey: .sailingEnabled)
+            ?? true
+        self.deadbandDelta = try c.decodeIfPresent(Int.self, forKey: .deadbandDelta)
+            ?? c.decodeIfPresent(Int.self, forKey: .sailingDelta)
+            ?? 3
+        self.thermalProtectionEnabled = try c.decodeIfPresent(Bool.self, forKey: .thermalProtectionEnabled) ?? true
+        self.autoServerMode = try c.decodeIfPresent(Bool.self, forKey: .autoServerMode) ?? true
+        self.pollIntervalSeconds = try c.decodeIfPresent(Double.self, forKey: .pollIntervalSeconds) ?? 5.0
+    }
+    
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(targetLimit, forKey: .targetLimit)
+        try c.encode(deadbandEnabled, forKey: .deadbandEnabled)
+        try c.encode(deadbandDelta, forKey: .deadbandDelta)
+        try c.encode(thermalProtectionEnabled, forKey: .thermalProtectionEnabled)
+        try c.encode(autoServerMode, forKey: .autoServerMode)
+        try c.encode(pollIntervalSeconds, forKey: .pollIntervalSeconds)
+    }
+    
     public static var `default`: GovernorConfig {
         GovernorConfig(
             targetLimit: 50,
-            sailingEnabled: true,
-            sailingDelta: 3,
+            deadbandEnabled: true,
+            deadbandDelta: 3,
             thermalProtectionEnabled: true,
             autoServerMode: true,
             pollIntervalSeconds: 5.0
@@ -94,7 +129,7 @@ public struct GovernorConfig: Codable, Equatable {
 public struct GovernorState: Codable {
     public var activeTarget: Int
     public var isChargingInhibited: Bool
-    public var isSailing: Bool
+    public var inDeadband: Bool
     public var isThermalThrottled: Bool
     public var modeDescription: String
     public var lastActionTimestamp: Date
@@ -105,7 +140,7 @@ public struct GovernorState: Codable {
         GovernorState(
             activeTarget: 50,
             isChargingInhibited: false,
-            isSailing: false,
+            inDeadband: false,
             isThermalThrottled: false,
             modeDescription: "Initializing",
             lastActionTimestamp: Date(),

@@ -13,8 +13,8 @@ final class ChargeCapTests: XCTestCase {
     func testConfigManager() {
         let cfg = GovernorConfig.default
         XCTAssertEqual(cfg.targetLimit, 50)
-        XCTAssertTrue(cfg.sailingEnabled)
-        XCTAssertEqual(cfg.sailingDelta, 3)
+        XCTAssertTrue(cfg.deadbandEnabled)
+        XCTAssertEqual(cfg.deadbandDelta, 3)
     }
     
     func testGovernorInitialization() {
@@ -27,8 +27,8 @@ final class ChargeCapTests: XCTestCase {
     func testConfigSerialization() throws {
         let cfg = GovernorConfig(
             targetLimit: 80,
-            sailingEnabled: false,
-            sailingDelta: 5,
+            deadbandEnabled: false,
+            deadbandDelta: 5,
             thermalProtectionEnabled: true,
             autoServerMode: false,
             pollIntervalSeconds: 10.0
@@ -36,8 +36,8 @@ final class ChargeCapTests: XCTestCase {
         let data = try JSONEncoder().encode(cfg)
         let decoded = try JSONDecoder().decode(GovernorConfig.self, from: data)
         XCTAssertEqual(decoded.targetLimit, 80)
-        XCTAssertFalse(decoded.sailingEnabled)
-        XCTAssertEqual(decoded.sailingDelta, 5)
+        XCTAssertFalse(decoded.deadbandEnabled)
+        XCTAssertEqual(decoded.deadbandDelta, 5)
     }
     
     func testSMCParamStructLayout() {

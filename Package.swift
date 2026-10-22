@@ -11,6 +11,10 @@ let package = Package(
             name: "chargecap",
             targets: ["ChargeCapCLI"]
         ),
+        .executable(
+            name: "ChargeCapApp",
+            targets: ["ChargeCapApp"]
+        ),
         .library(
             name: "ChargeCapCore",
             targets: ["ChargeCapCore"]
@@ -27,6 +31,11 @@ let package = Package(
             name: "ChargeCapCLI",
             dependencies: ["ChargeCapCore"],
             path: "Sources/ChargeCapCLI"
+        ),
+        .executableTarget(
+            name: "ChargeCapApp",
+            dependencies: ["ChargeCapCore"],
+            path: "Sources/ChargeCapApp"
         ),
         .testTarget(
             name: "ChargeCapTests",

@@ -1,7 +1,7 @@
 import Foundation
 import ChargeCapCore
 
-let VERSION = "0.1.0"
+let VERSION = "0.2.0"
 
 func printHelp() {
     print("""
@@ -13,18 +13,18 @@ func printHelp() {
       chargecap <command> [options]
     
     COMMANDS:
-      status [--json]          Display battery health, power telemetry, and governor status
-      set <limit>              Set target charge limit (e.g. 50, 80)
-      sailing <on|off> [delta] Toggle micro-sailing hysteresis (e.g. sailing on 3)
-      daemon                   Run the AI power management governor in the foreground
-      install                  Install and bootstrap background LaunchDaemon (runs 24/7 as root)
-      uninstall                Remove and unload background LaunchDaemon
-      version                  Print version information
+      status [--json]           Display battery health, power telemetry, and governor status
+      set <limit>               Set target charge limit (e.g. 50, 80)
+      deadband <on|off> [delta] Configure hysteresis deadband (e.g. deadband on 3)
+      daemon                    Run the AI power management governor in the foreground
+      install                   Install and bootstrap background LaunchDaemon (runs 24/7 as root)
+      uninstall                 Remove and unload background LaunchDaemon
+      version                   Print version information
     
     EXAMPLES:
       chargecap status
       sudo chargecap set 50
-      sudo chargecap sailing on 3
+      sudo chargecap deadband on 3
       sudo chargecap install
     """)
 }
@@ -74,7 +74,7 @@ func handleStatus(jsonOutput: Bool) {
     ⚡ CHARGECAP POWER TELEMETRY & GOVERNOR
     ========================================================================
       Battery Level:      \(status.percent)% (\(chargingStr))
-      Target Limit:       \(cfg.targetLimit)% \(cfg.sailingEnabled ? "(Micro-Sailing ±\(cfg.sailingDelta)%)" : "(Fixed)")
+      Target Limit:       \(cfg.targetLimit)% \(cfg.deadbandEnabled ? "(Deadband -\(cfg.deadbandDelta)%)" : "(Strict)")
       Governor State:     \(governorMode)
       Health Condition:   [\(bar)] \(status.healthPercent)%
       Cycle Count:        \(status.cycleCount) cycles
@@ -106,20 +106,20 @@ func handleSet(args: [String]) {
     cfg.targetLimit = val
     if ConfigManager.shared.save(cfg) {
         let hw = HardwareBackend()
-        _ = hw.setChargeLimitPercentage(val, delta: cfg.sailingEnabled ? cfg.sailingDelta : 1)
+        _ = hw.setChargeLimitPercentage(val, delta: cfg.deadbandEnabled ? cfg.deadbandDelta : 1)
         print("✅ Saved target charge limit: \(val)%")
     } else {
         print("⚠️ Warning: Could not write configuration. Try running with 'sudo'.")
     }
 }
 
-func handleSailing(args: [String]) {
+func handleDeadband(args: [String]) {
     guard getuid() == 0 else {
-        print("❌ Power control requires root privileges. Please run with sudo:\n   sudo chargecap sailing \(args.joined(separator: " "))")
+        print("❌ Power control requires root privileges. Please run with sudo:\n   sudo chargecap deadband \(args.joined(separator: " "))")
         exit(1)
     }
     guard let first = args.first?.lowercased() else {
-        print("❌ Usage: sudo chargecap sailing <on|off> [delta_percent]")
+        print("❌ Usage: sudo chargecap deadband <on|off> [delta_percent]")
         exit(1)
     }
     
@@ -129,16 +129,16 @@ func handleSailing(args: [String]) {
         delta = d
     }
     
-    if let resp = UnixSocketClient.send("SAILING \(enabled ? "on" : "off") \(delta)"), resp.contains("\"success\":true") {
-        print("✅ Micro-sailing updated via socket: \(enabled ? "ENABLED (±\(delta)%)" : "DISABLED")")
+    if let resp = UnixSocketClient.send("DEADBAND \(enabled ? "on" : "off") \(delta)"), resp.contains("\"success\":true") {
+        print("✅ Hysteresis deadband updated via socket: \(enabled ? "ENABLED (-\(delta)%)" : "DISABLED")")
         return
     }
     
     var cfg = ConfigManager.shared.load()
-    cfg.sailingEnabled = enabled
-    cfg.sailingDelta = delta
+    cfg.deadbandEnabled = enabled
+    cfg.deadbandDelta = delta
     if ConfigManager.shared.save(cfg) {
-        print("✅ Micro-sailing updated: \(enabled ? "ENABLED (±\(delta)%)" : "DISABLED")")
+        print("✅ Hysteresis deadband updated: \(enabled ? "ENABLED (-\(delta)%)" : "DISABLED")")
     } else {
         print("⚠️ Warning: Could not write configuration. Try running with 'sudo'.")
     }
@@ -280,8 +280,8 @@ case "status":
     handleStatus(jsonOutput: isJson)
 case "set":
     handleSet(args: Array(args.dropFirst()))
-case "sailing":
-    handleSailing(args: Array(args.dropFirst()))
+case "deadband":
+    handleDeadband(args: Array(args.dropFirst()))
 case "daemon":
     handleDaemon()
 case "install":

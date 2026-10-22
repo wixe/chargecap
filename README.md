@@ -12,47 +12,53 @@
 
 ## ⚡ What is ChargeCap?
 
-**ChargeCap** is a native, featherweight power management daemon and CLI designed for Apple Silicon (M1/M2/M3/M4) and Intel MacBooks. It was created to solve the fundamental reliability issues of legacy tools like AlDente:
+**ChargeCap** is a native, featherweight closed-loop power governor, menu bar app, and CLI designed for Apple Silicon (M1/M2/M3/M4) and Intel MacBooks:
 
-* **Closed-Loop Verification:** Unlike AlDente—which writes a target once and fails when macOS silently resets SMC registers after sleep, lid closing, or charger negotiation—ChargeCap monitors IOKit power events continuously and re-enforces your limit in sub-second time.
-* **Autonomous Micro-Sailing:** Prevents constant micro-trickling into lithium cells by letting charge gently float within an optimal hysteresis band (e.g. 47%–50% for a 50% storage limit).
+* **Closed-Loop SMC Verification:** Instead of writing a charge target once and hoping the hardware remembers it after sleep, lid closing, or USB-C PD negotiation, ChargeCap monitors IOKit power events continuously and re-enforces your limit in sub-second time.
+* **True AC Pass-Through:** Inhibits cell charging while routing 100% of system load directly from the wall adapter (`0 mA` battery current, `0.00W` battery stress) without cutting AC input.
+* **Hysteresis Deadband Control:** Prevents constant micro-trickling into lithium cells by allowing State of Charge (SoC) to float naturally within a configurable deadband window (e.g. 47%–50% for a 50% storage limit).
 * **Thermal-Aware Chemistry Protection:** Automatically throttles or inhibits charging when battery or system thermal pressure rises, preventing additive thermal stress (charging heat + CPU/GPU load).
-* **Headless Fleet & Server Native:** Operates headlessly as a root `LaunchDaemon` without requiring any user to be logged into a desktop session.
+* **Menu Bar UI + Headless LaunchDaemon:** Includes a native macOS Menu Bar app (`ChargeCap.app`) with a live Settings window alongside a 24/7 root `LaunchDaemon` that operates even when no user is logged in.
 * **Bidirectional Unix Socket IPC:** Communicates over `/var/run/chargecap.sock` with kernel-level `getpeereid()` root verification for power control commands and zero network stack overhead.
 * **Ultra-Lightweight:** Compiled native Swift binary is **< 300 KB** with **< 10 MB RAM** footprint, zero open TCP/UDP ports, and 0% CPU usage.
 
 ---
 
-## 📊 ChargeCap vs. AlDente
+## 📊 Architecture & Specifications
 
-| Feature | AlDente (Free / Pro) | ChargeCap |
-| :--- | :--- | :--- |
-| **Price & License** | Proprietary ($14 / $30 subscription) | **100% Free & Open Source (MIT)** |
-| **Binary & Memory Footprint** | ~60 MB RAM + 3% CPU background load | **< 300 KB binary, < 10 MB RAM, 0% CPU** |
-| **Closed-Loop Anti-Creep** | ❌ Fails silently after sleep/wake | **✅ Sub-second verification & re-enforcement** |
-| **Micro-Sailing Mode** | 🔒 Paid Pro Paywall | **✅ Built-in & configurable** |
-| **Thermal Protection** | 🔒 Paid Pro Paywall | **✅ Built-in IOKit thermal governor** |
-| **Headless / Server Run** | ❌ Requires logged-in GUI user session | **✅ Native 24/7 root LaunchDaemon** |
-| **Unix Socket IPC** | ❌ None | **✅ `/var/run/chargecap.sock` (`getpeereid` secured)** |
-| **Open Source** | ❌ Closed source helper binary | **✅ 100% Native Swift 6** |
+| Capability | ChargeCap Implementation |
+| :--- | :--- |
+| **Control Loop Architecture** | Closed-loop IOKit event observer + periodic SMC register verification |
+| **Power Path Routing** | Hardware AC Pass-Through (`AppleSmartBatteryManager` / AppleSMC charge inhibit) |
+| **Charge Regulation** | Configurable target setpoint (20%–100%) with **Hysteresis Deadband** (`±1%` to `±15%`) |
+| **Thermal Governor** | Automatic charge inhibition under `Serious` / `Critical` IOKit thermal pressure |
+| **Privilege Separation** | Read-only telemetry for standard users; kernel `getpeereid() == 0` required for writes |
+| **IPC Transport** | Pure POSIX `AF_UNIX` domain socket (`/var/run/chargecap.sock`) with `500ms` timeouts |
+| **Desktop & Headless Modes** | Native AppKit Menu Bar + Settings app (`ChargeCap.app`) & root `LaunchDaemon` |
+| **Footprint & License** | **< 300 KB** Universal binary, **< 10 MB RAM**, **0% CPU**, **100% Open Source (MIT)** |
 
 ---
 
-## 🚀 Quick Start (No Compiler or Xcode Required)
+## 🚀 Quick Start (No Compiler or Terminal Required)
 
-### Option 1: One-Line Install
+### Option 1: macOS Menu Bar App (`ChargeCap.dmg` — Drag & Drop)
+1. Download **[`ChargeCap.dmg`](https://github.com/wixe/chargecap/raw/main/dist/ChargeCap.dmg)** and open it.
+2. Drag **`ChargeCap.app`** into the **`Applications`** folder.
+3. Open **`ChargeCap`** from `/Applications` — it adds the **`⚡ ChargeCap`** icon to your top-right macOS Menu Bar, opens the Settings window, and lets you install/uninstall the background governor or adjust charge limits with 1 click.
+
+### Option 2: One-Line Terminal Install
 ```bash
 curl -fsSL https://raw.githubusercontent.com/wixe/chargecap/main/install.sh | sudo bash
 ```
 
-### Option 2: Clone & Install (Uses Precompiled Universal Binary `bin/chargecap`)
+### Option 3: Clone & Install (Uses Precompiled Universal Binary `bin/chargecap`)
 ```bash
 git clone https://github.com/wixe/chargecap.git
 cd chargecap
 sudo ./install.sh
 ```
 
-### Option 3: Build from Source (Optional, requires Swift)
+### Option 4: Build from Source (Optional, requires Swift)
 ```bash
 sudo ./install.sh --build
 ```
@@ -73,11 +79,11 @@ chargecap status --json
 # Set target charge limit (requires sudo)
 sudo chargecap set 50
 
-# Configure micro-sailing hysteresis (requires sudo)
-sudo chargecap sailing on 3
+# Configure hysteresis deadband (requires sudo)
+sudo chargecap deadband on 3
 
-# Turn off sailing / strict cap (requires sudo)
-sudo chargecap sailing off
+# Turn off hysteresis deadband / strict cap (requires sudo)
+sudo chargecap deadband off
 
 # Query or control directly via Unix socket pipe
 echo "STATUS" | nc -U /var/run/chargecap.sock
@@ -101,7 +107,7 @@ Running `chargecap status` displays high-precision hardware diagnostics:
 ⚡ CHARGECAP POWER TELEMETRY & GOVERNOR
 ========================================================================
   Battery Level:      55% (🔌 AC Connected (Not Charging))
-  Target Limit:       50% (Micro-Sailing ±3%)
+  Target Limit:       50% (Hysteresis Deadband ±3%)
   Governor State:     Holding Cap at 50% (Idle AC Pass-through)
   Health Condition:   [█████████████████░░░] 86.2%
   Cycle Count:        121 cycles
@@ -122,9 +128,9 @@ Configuration is automatically stored at `/etc/chargecap.json` (or `~/.config/ch
 ```json
 {
   "autoServerMode": true,
+  "deadbandDelta": 3,
+  "deadbandEnabled": true,
   "pollIntervalSeconds": 5.0,
-  "sailingDelta": 3,
-  "sailingEnabled": true,
   "targetLimit": 50,
   "thermalProtectionEnabled": true
 }

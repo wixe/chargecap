@@ -16,7 +16,7 @@ public class AIGovernor {
         self.config = config
         self.state = GovernorState.initial
         self.state.activeTarget = config.targetLimit
-        _ = self.hardware.setChargeLimitPercentage(config.targetLimit, delta: config.sailingEnabled ? config.sailingDelta : 1)
+        _ = self.hardware.setChargeLimitPercentage(config.targetLimit, delta: config.deadbandEnabled ? config.deadbandDelta : 1)
     }
     
     public func updateConfig(_ newConfig: GovernorConfig) {
@@ -25,7 +25,7 @@ public class AIGovernor {
         self.state.activeTarget = newConfig.targetLimit
         stateLock.unlock()
         _ = ConfigManager.shared.save(newConfig)
-        _ = hardware.setChargeLimitPercentage(newConfig.targetLimit, delta: newConfig.sailingEnabled ? newConfig.sailingDelta : 1)
+        _ = hardware.setChargeLimitPercentage(newConfig.targetLimit, delta: newConfig.deadbandEnabled ? newConfig.deadbandDelta : 1)
         evaluateTick()
     }
     
@@ -34,7 +34,7 @@ public class AIGovernor {
         isRunning = true
         
         // Initial setup
-        _ = hardware.setChargeLimitPercentage(config.targetLimit, delta: config.sailingEnabled ? config.sailingDelta : 1)
+        _ = hardware.setChargeLimitPercentage(config.targetLimit, delta: config.deadbandEnabled ? config.deadbandDelta : 1)
         evaluateTick()
         
         queue.async { [weak self] in
@@ -61,7 +61,7 @@ public class AIGovernor {
         if diskConfig != self.config {
             self.config = diskConfig
             self.state.activeTarget = diskConfig.targetLimit
-            _ = hardware.setChargeLimitPercentage(diskConfig.targetLimit, delta: diskConfig.sailingEnabled ? diskConfig.sailingDelta : 1)
+            _ = hardware.setChargeLimitPercentage(diskConfig.targetLimit, delta: diskConfig.deadbandEnabled ? diskConfig.deadbandDelta : 1)
         }
         
         guard status.isACConnected else {
@@ -86,32 +86,32 @@ public class AIGovernor {
         }
         
         let target = config.targetLimit
-        let lowerBound = max(20, target - (config.sailingEnabled ? config.sailingDelta : 1))
+        let lowerBound = max(20, target - (config.deadbandEnabled ? config.deadbandDelta : 1))
         
         // 2. Closed-Loop Upper Limit Enforcement
         if status.percent >= target {
             if status.isCharging || !state.isChargingInhibited {
                 let success = hardware.setChargingInhibited(true)
                 state.isChargingInhibited = true
-                state.isSailing = true
+                state.inDeadband = true
                 state.lastActionTimestamp = Date()
                 state.lastActionReason = "Target reached (\(status.percent)% >= \(target)%). Inhibiting charge."
-                state.modeDescription = "Holding Cap at \(target)% (Sailing Idle)"
+                state.modeDescription = "Holding Cap at \(target)% (AC Pass-Through)"
                 if !success { state.consecutiveErrors += 1 }
             } else {
-                state.modeDescription = "Holding Cap at \(target)% (Idle AC Pass-through)"
+                state.modeDescription = "Holding Cap at \(target)% (Idle AC Pass-Through)"
             }
             return
         }
         
-        // 3. Lower Bound Hysteresis (Micro-Sailing)
+        // 3. Lower Bound Hysteresis (Deadband Recovery)
         if status.percent <= lowerBound {
             if state.isChargingInhibited || !status.isCharging {
                 let success = hardware.setChargingInhibited(false)
                 state.isChargingInhibited = false
-                state.isSailing = false
+                state.inDeadband = false
                 state.lastActionTimestamp = Date()
-                state.lastActionReason = "Battery reached lower sailing bound (\(status.percent)% <= \(lowerBound)%). Re-enabling charge."
+                state.lastActionReason = "Battery reached lower deadband threshold (\(status.percent)% <= \(lowerBound)%). Re-enabling charge."
                 state.modeDescription = "Gentle Charging to \(target)%"
                 if !success { state.consecutiveErrors += 1 }
             } else {
@@ -120,9 +120,9 @@ public class AIGovernor {
             return
         }
         
-        // 4. In Between Lower and Upper Bound (Sailing Mode)
-        if config.sailingEnabled && state.isSailing {
-            state.modeDescription = "Micro-Sailing (\(status.percent)% within \(lowerBound)%-\(target)%)"
+        // 4. Within Hysteresis Deadband Window
+        if config.deadbandEnabled && state.inDeadband {
+            state.modeDescription = "Hysteresis Deadband (\(status.percent)% within \(lowerBound)%-\(target)%)"
         } else {
             state.modeDescription = "Optimal Range (\(status.percent)%)"
         }
@@ -151,8 +151,8 @@ public class AIGovernor {
             ],
             "governor": [
                 "target_limit": config.targetLimit,
-                "sailing_enabled": config.sailingEnabled,
-                "sailing_delta": config.sailingDelta,
+                "deadband_enabled": config.deadbandEnabled,
+                "deadband_delta": config.deadbandDelta,
                 "charging_inhibited": state.isChargingInhibited,
                 "thermal_throttled": state.isThermalThrottled,
                 "mode": state.modeDescription,
