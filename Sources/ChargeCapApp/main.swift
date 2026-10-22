@@ -292,18 +292,35 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
         settingsWindow?.makeKeyAndOrderFront(nil)
     }
     
+    private func isDaemonBinaryUpToDate() -> Bool {
+        guard let resPath = Bundle.main.resourcePath else { return true }
+        let bundled = "\(resPath)/chargecap"
+        guard FileManager.default.isExecutableFile(atPath: bundled),
+              FileManager.default.isExecutableFile(atPath: "/usr/local/bin/chargecap") else {
+            return false
+        }
+        return FileManager.default.contentsEqual(atPath: bundled, andPath: "/usr/local/bin/chargecap")
+    }
+    
     private func refreshSettingsWindow() {
         guard settingsWindow != nil else { return }
         let status = monitor.getCurrentStatus()
         let cfg = ConfigManager.shared.load()
         let daemonInfo = fetchDaemonStatus()
         let daemonActive = daemonInfo.running
+        let upToDate = isDaemonBinaryUpToDate()
         let govMode = daemonInfo.mode
         
-        daemonBadgeLabel?.stringValue = daemonActive
-            ? "✅ Background Daemon Active (/var/run/chargecap.sock)"
-            : "⚠️ Background Daemon Not Running — Click 'Install / Update Background Daemon' below"
-        daemonBadgeLabel?.textColor = daemonActive ? .systemGreen : .systemOrange
+        if daemonActive && upToDate {
+            daemonBadgeLabel?.stringValue = "✅ Background Daemon Active & Up-to-Date (/var/run/chargecap.sock)"
+            daemonBadgeLabel?.textColor = .systemGreen
+        } else if daemonActive && !upToDate {
+            daemonBadgeLabel?.stringValue = "⚠️ Daemon Update Available — Click 'Install / Update Background Daemon' below"
+            daemonBadgeLabel?.textColor = .systemOrange
+        } else {
+            daemonBadgeLabel?.stringValue = "⚠️ Background Daemon Not Running — Click 'Install / Update Background Daemon' below"
+            daemonBadgeLabel?.textColor = .systemOrange
+        }
         
         let stateStr = status.isCharging ? "⚡ Charging" : (status.isACConnected ? "🔌 AC Connected (Not Charging)" : "🔋 On Battery")
         batteryLabel?.stringValue = "Battery: \(status.percent)% (\(stateStr))  •  Cap: \(cfg.targetLimit)%"

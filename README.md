@@ -30,7 +30,7 @@
 | :--- | :--- |
 | **Control Loop Architecture** | Closed-loop IOKit event observer + periodic SMC register verification |
 | **Power Path Routing** | Hardware AC Pass-Through (`AppleSmartBatteryManager` / AppleSMC charge inhibit) |
-| **Charge Regulation** | Configurable target setpoint (20%–100%) with **Hysteresis Deadband** (`±1%` to `±15%`) |
+| **Charge Regulation** | Configurable target setpoint (30%–100%) with **Hysteresis Deadband** (`±1%` to `±10%`) |
 | **Thermal Governor** | Automatic charge inhibition under `Serious` / `Critical` IOKit thermal pressure |
 | **Privilege Separation** | Read-only telemetry for standard users; kernel `getpeereid() == 0` required for writes |
 | **IPC Transport** | Pure POSIX `AF_UNIX` domain socket (`/var/run/chargecap.sock`) with `500ms` timeouts |
@@ -45,6 +45,7 @@
 1. Download **[`ChargeCap.dmg`](https://github.com/wixe/chargecap/raw/main/dist/ChargeCap.dmg)** and open it.
 2. Drag **`ChargeCap.app`** into the **`Applications`** folder.
 3. Open **`ChargeCap`** from `/Applications` — it adds the **`⚡ ChargeCap`** icon to your top-right macOS Menu Bar, opens the Settings window, and lets you install/uninstall the background governor or adjust charge limits with 1 click.
+   > **Note on macOS Gatekeeper:** Because ChargeCap is free, open-source software signed ad-hoc (`codesign --sign -`), macOS may show an *"unverified developer"* prompt the first time you open a browser-downloaded `.dmg`. Either click **Open Anyway** in **System Settings → Privacy & Security**, or run `xattr -cr /Applications/ChargeCap.app` once in Terminal (or use Option 2 below, which bypasses browser quarantine automatically).
 
 ### Option 2: One-Line Terminal Install
 ```bash

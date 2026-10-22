@@ -55,7 +55,29 @@ fi
 echo "⚙️  Configuring LaunchDaemon..."
 "$INSTALL_DIR/chargecap" install
 
+echo "🖥  Installing ChargeCap.app to /Applications..."
+DMG_PATH="$SCRIPT_DIR/dist/ChargeCap.dmg"
+TMP_DMG=""
+if [[ ! -f "$DMG_PATH" ]]; then
+    TMP_DMG="$(mktemp /tmp/ChargeCap.XXXXXX.dmg)"
+    curl -fsSL "https://github.com/wixe/chargecap/raw/main/dist/ChargeCap.dmg" -o "$TMP_DMG"
+    DMG_PATH="$TMP_DMG"
+fi
+
+MOUNT_DIR="$(mktemp -d /tmp/chargecap-mnt.XXXXXX)"
+if hdiutil attach "$DMG_PATH" -mountpoint "$MOUNT_DIR" -nobrowse -quiet; then
+    rm -rf "/Applications/ChargeCap.app"
+    cp -R "$MOUNT_DIR/ChargeCap.app" "/Applications/ChargeCap.app"
+    hdiutil detach "$MOUNT_DIR" -quiet || true
+    xattr -cr "/Applications/ChargeCap.app" 2>/dev/null || true
+    codesign --force --deep --sign - "/Applications/ChargeCap.app" 2>/dev/null || true
+fi
+rmdir "$MOUNT_DIR" 2>/dev/null || true
+if [[ -n "$TMP_DMG" ]]; then
+    rm -f "$TMP_DMG"
+fi
+
 echo ""
-echo "✅ Installation complete!"
+echo "✅ Installation complete! (/Applications/ChargeCap.app + Background Daemon)"
 echo ""
 "$INSTALL_DIR/chargecap" status
