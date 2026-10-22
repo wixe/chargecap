@@ -38,21 +38,23 @@
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Quick Start (No Compiler or Xcode Required)
 
-### 1. Build & Install from Source
+### Option 1: One-Line Install
+```bash
+curl -fsSL https://raw.githubusercontent.com/wixe/chargecap/main/install.sh | sudo bash
+```
+
+### Option 2: Clone & Install (Uses Precompiled Universal Binary `bin/chargecap`)
 ```bash
 git clone https://github.com/wixe/chargecap.git
 cd chargecap
-
-# Build release binary and install system-wide
 sudo ./install.sh
 ```
 
-### 2. Manual Compilation
+### Option 3: Build from Source (Optional, requires Swift)
 ```bash
-swift build -c release --build-system native
-sudo ./install.sh
+sudo ./install.sh --build
 ```
 
 ---
