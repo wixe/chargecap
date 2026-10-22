@@ -18,8 +18,7 @@
 * **Autonomous Micro-Sailing:** Prevents constant micro-trickling into lithium cells by letting charge gently float within an optimal hysteresis band (e.g. 47%–50% for a 50% storage limit).
 * **Thermal-Aware Chemistry Protection:** Automatically throttles or inhibits charging when battery or system thermal pressure rises, preventing additive thermal stress (charging heat + CPU/GPU load).
 * **Headless Fleet & Server Native:** Operates headlessly as a root `LaunchDaemon` without requiring any user to be logged into a desktop session.
-* **Built-in REST API:** Serves live JSON battery metrics and control endpoints over HTTP (`:8772`) for remote fleet dashboards and home automation.
-* **Ultra-Lightweight:** Compiled native Swift binary is **< 300 KB** with **< 10 MB RAM** footprint and 0% CPU usage.
+* **Ultra-Lightweight:** Compiled native Swift binary is **< 300 KB** with **< 10 MB RAM** footprint, zero open network ports, and 0% CPU usage.
 
 ---
 
@@ -33,7 +32,6 @@
 | **Micro-Sailing Mode** | 🔒 Paid Pro Paywall | **✅ Built-in & configurable** |
 | **Thermal Protection** | 🔒 Paid Pro Paywall | **✅ Built-in IOKit thermal governor** |
 | **Headless / Server Run** | ❌ Requires logged-in GUI user session | **✅ Native 24/7 root LaunchDaemon** |
-| **Remote HTTP REST API** | ❌ None | **✅ Port 8772 JSON API for fleet monitoring** |
 | **Open Source** | ❌ Closed source helper binary | **✅ 100% Native Swift 6** |
 
 ---
@@ -105,50 +103,9 @@ Running `chargecap status` displays high-precision hardware diagnostics:
   Voltage & Current:  11389 mV  •  -612 mA (6.97W)
   Hardware Capacity:  3764 / 4382 mAh
   Thermal State:      Nominal
-  Hardware Backend:   Direct AppleSMC Driver
+  Hardware Backend:   Direct AppleSMC Driver (AC Pass-Through)
   Serial Number:      D862125AQVYPJYRA4
 ========================================================================
-```
-
----
-
-## 🌐 Remote REST API
-
-When the daemon is active, ChargeCap exposes a lightweight HTTP server on port `8772`:
-
-### Endpoints
-
-| Endpoint | Method | Description |
-| :--- | :--- | :--- |
-| `/api/status` | `GET` | Complete JSON report (battery stats, health, governor state, thermal pressure) |
-| `/api/set?limit=<20-100>` | `GET` | Dynamically change the target limit on the fly without restarting daemon |
-
-### Example JSON Payload (`GET /api/status`)
-```json
-{
-  "battery": {
-    "amperage_ma": -612,
-    "cycle_count": 120,
-    "design_capacity_mah": 4382,
-    "full_capacity_mah": 3764,
-    "health_percent": 85.9,
-    "is_ac_connected": true,
-    "is_charging": false,
-    "percent": 50,
-    "thermal_state": "Nominal",
-    "voltage_mv": 11389,
-    "wattage_w": 6.97
-  },
-  "governor": {
-    "backend": "Direct AppleSMC Driver",
-    "charging_inhibited": true,
-    "mode": "Holding Cap at 50% (Idle AC Pass-through)",
-    "sailing_delta": 3,
-    "sailing_enabled": true,
-    "target_limit": 50,
-    "thermal_throttled": false
-  }
-}
 ```
 
 ---
@@ -160,8 +117,6 @@ Configuration is automatically stored at `/etc/chargecap.json` (or `~/.config/ch
 ```json
 {
   "autoServerMode": true,
-  "httpEnabled": true,
-  "httpPort": 8772,
   "pollIntervalSeconds": 5.0,
   "sailingDelta": 3,
   "sailingEnabled": true,

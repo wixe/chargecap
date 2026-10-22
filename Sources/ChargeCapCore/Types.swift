@@ -55,15 +55,29 @@ public struct BatteryStatus: Codable {
     }
 }
 
-public struct GovernorConfig: Codable {
+public struct GovernorConfig: Codable, Equatable {
     public var targetLimit: Int
     public var sailingEnabled: Bool
     public var sailingDelta: Int
     public var thermalProtectionEnabled: Bool
     public var autoServerMode: Bool
     public var pollIntervalSeconds: Double
-    public var httpPort: Int
-    public var httpEnabled: Bool
+    
+    public init(
+        targetLimit: Int,
+        sailingEnabled: Bool,
+        sailingDelta: Int,
+        thermalProtectionEnabled: Bool,
+        autoServerMode: Bool,
+        pollIntervalSeconds: Double
+    ) {
+        self.targetLimit = targetLimit
+        self.sailingEnabled = sailingEnabled
+        self.sailingDelta = sailingDelta
+        self.thermalProtectionEnabled = thermalProtectionEnabled
+        self.autoServerMode = autoServerMode
+        self.pollIntervalSeconds = pollIntervalSeconds
+    }
     
     public static var `default`: GovernorConfig {
         GovernorConfig(
@@ -72,9 +86,7 @@ public struct GovernorConfig: Codable {
             sailingDelta: 3,
             thermalProtectionEnabled: true,
             autoServerMode: true,
-            pollIntervalSeconds: 5.0,
-            httpPort: 8772,
-            httpEnabled: true
+            pollIntervalSeconds: 5.0
         )
     }
 }

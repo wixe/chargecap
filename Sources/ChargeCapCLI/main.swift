@@ -76,26 +76,11 @@ func handleSet(args: [String]) {
         exit(1)
     }
     
-    // Check if daemon is running via HTTP
-    if let url = URL(string: "http://127.0.0.1:8772/api/set?limit=\(val)") {
-        var req = URLRequest(url: url)
-        req.timeoutInterval = 1.0
-        let sema = DispatchSemaphore(value: 0)
-        let task = URLSession.shared.dataTask(with: req) { _, response, _ in
-            if let http = response as? HTTPURLResponse, http.statusCode == 200 {
-                print("✅ ChargeCap daemon updated: target limit is now \(val)%.")
-            }
-            sema.signal()
-        }
-        task.resume()
-        _ = sema.wait(timeout: .now() + 1.2)
-    }
-    
     var cfg = ConfigManager.shared.load()
     cfg.targetLimit = val
     if ConfigManager.shared.save(cfg) {
         let hw = HardwareBackend()
-        _ = hw.setChargeLimitPercentage(val)
+        _ = hw.setChargeLimitPercentage(val, delta: cfg.sailingEnabled ? cfg.sailingDelta : 1)
         print("✅ Saved target charge limit: \(val)%")
     } else {
         print("⚠️ Warning: Could not write configuration. Try running with 'sudo'.")
@@ -129,12 +114,6 @@ func handleDaemon() {
     let cfg = ConfigManager.shared.load()
     let governor = AIGovernor(config: cfg)
     governor.start()
-    
-    var server: StatusServer? = nil
-    if cfg.httpEnabled {
-        server = StatusServer(port: cfg.httpPort, governor: governor)
-        server?.start()
-    }
     
     // Register signal handler for clean shutdown
     signal(SIGINT) { _ in

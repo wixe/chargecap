@@ -31,15 +31,13 @@ final class ChargeCapTests: XCTestCase {
             sailingDelta: 5,
             thermalProtectionEnabled: true,
             autoServerMode: false,
-            pollIntervalSeconds: 10.0,
-            httpPort: 9000,
-            httpEnabled: false
+            pollIntervalSeconds: 10.0
         )
         let data = try JSONEncoder().encode(cfg)
         let decoded = try JSONDecoder().decode(GovernorConfig.self, from: data)
         XCTAssertEqual(decoded.targetLimit, 80)
         XCTAssertFalse(decoded.sailingEnabled)
-        XCTAssertEqual(decoded.httpPort, 9000)
+        XCTAssertEqual(decoded.sailingDelta, 5)
     }
     
     func testSMCParamStructLayout() {

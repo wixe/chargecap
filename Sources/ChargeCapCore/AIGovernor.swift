@@ -54,8 +54,15 @@ public class AIGovernor {
     
     public func evaluateTick() {
         let status = monitor.getCurrentStatus()
+        let diskConfig = ConfigManager.shared.load()
         stateLock.lock()
         defer { stateLock.unlock() }
+        
+        if diskConfig != self.config {
+            self.config = diskConfig
+            self.state.activeTarget = diskConfig.targetLimit
+            _ = hardware.setChargeLimitPercentage(diskConfig.targetLimit, delta: diskConfig.sailingEnabled ? diskConfig.sailingDelta : 1)
+        }
         
         guard status.isACConnected else {
             state.modeDescription = "Running on Battery Power (\(status.percent)%)"
