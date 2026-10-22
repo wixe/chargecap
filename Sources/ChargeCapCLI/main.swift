@@ -23,19 +23,21 @@ func printHelp() {
     
     EXAMPLES:
       chargecap status
-      chargecap set 50
-      chargecap sailing on 3
+      sudo chargecap set 50
+      sudo chargecap sailing on 3
       sudo chargecap install
     """)
 }
 
+var ipcServer: UnixSocketServer? = nil
+
 func handleStatus(jsonOutput: Bool) {
-    let monitor = BatteryMonitor()
-    let status = monitor.getCurrentStatus()
-    let cfg = ConfigManager.shared.load()
-    let hw = HardwareBackend()
-    
     if jsonOutput {
+        if let liveJson = UnixSocketClient.send("STATUS") {
+            print(liveJson.trimmingCharacters(in: .whitespacesAndNewlines))
+            return
+        }
+        let cfg = ConfigManager.shared.load()
         let governor = AIGovernor(config: cfg)
         let report = governor.getCombinedReport()
         if let data = try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]),
@@ -43,6 +45,20 @@ func handleStatus(jsonOutput: Bool) {
             print(str)
         }
         return
+    }
+    
+    let monitor = BatteryMonitor()
+    let status = monitor.getCurrentStatus()
+    let cfg = ConfigManager.shared.load()
+    let hw = HardwareBackend()
+    
+    var governorMode = "Offline (Run 'sudo chargecap install')"
+    if let liveJson = UnixSocketClient.send("STATUS"),
+       let data = liveJson.data(using: .utf8),
+       let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+       let gov = obj["governor"] as? [String: Any],
+       let mode = gov["mode"] as? String {
+        governorMode = mode
     }
     
     let isAC = status.isACConnected
@@ -59,6 +75,7 @@ func handleStatus(jsonOutput: Bool) {
     ========================================================================
       Battery Level:      \(status.percent)% (\(chargingStr))
       Target Limit:       \(cfg.targetLimit)% \(cfg.sailingEnabled ? "(Micro-Sailing ±\(cfg.sailingDelta)%)" : "(Fixed)")
+      Governor State:     \(governorMode)
       Health Condition:   [\(bar)] \(status.healthPercent)%
       Cycle Count:        \(status.cycleCount) cycles
       Voltage & Current:  \(status.voltageMV) mV  •  \(status.amperageMA) mA (\(wattageStr))
@@ -71,9 +88,18 @@ func handleStatus(jsonOutput: Bool) {
 }
 
 func handleSet(args: [String]) {
-    guard let first = args.first, let val = Int(first), val >= 20 && val <= 100 else {
-        print("❌ Error: Please specify a valid limit between 20 and 100 (e.g. 'chargecap set 50')")
+    guard getuid() == 0 else {
+        print("❌ Power control requires root privileges. Please run with sudo:\n   sudo chargecap set \(args.first ?? "50")")
         exit(1)
+    }
+    guard let first = args.first, let val = Int(first), val >= 20 && val <= 100 else {
+        print("❌ Error: Please specify a valid limit between 20 and 100 (e.g. 'sudo chargecap set 50')")
+        exit(1)
+    }
+    
+    if let resp = UnixSocketClient.send("SET \(val)"), resp.contains("\"success\":true") {
+        print("✅ ChargeCap daemon updated via socket: target limit is now \(val)%.")
+        return
     }
     
     var cfg = ConfigManager.shared.load()
@@ -88,8 +114,12 @@ func handleSet(args: [String]) {
 }
 
 func handleSailing(args: [String]) {
+    guard getuid() == 0 else {
+        print("❌ Power control requires root privileges. Please run with sudo:\n   sudo chargecap sailing \(args.joined(separator: " "))")
+        exit(1)
+    }
     guard let first = args.first?.lowercased() else {
-        print("❌ Usage: chargecap sailing <on|off> [delta_percent]")
+        print("❌ Usage: sudo chargecap sailing <on|off> [delta_percent]")
         exit(1)
     }
     
@@ -97,6 +127,11 @@ func handleSailing(args: [String]) {
     var delta = 3
     if args.count > 1, let d = Int(args[1]), d >= 1 && d <= 10 {
         delta = d
+    }
+    
+    if let resp = UnixSocketClient.send("SAILING \(enabled ? "on" : "off") \(delta)"), resp.contains("\"success\":true") {
+        print("✅ Micro-sailing updated via socket: \(enabled ? "ENABLED (±\(delta)%)" : "DISABLED")")
+        return
     }
     
     var cfg = ConfigManager.shared.load()
@@ -115,13 +150,20 @@ func handleDaemon() {
     let governor = AIGovernor(config: cfg)
     governor.start()
     
+    let server = UnixSocketServer(governor: governor)
+    server.start()
+    ipcServer = server
+    print("🔌 ChargeCap Unix Socket listening at \(UnixSocketServer.defaultSocketPath)")
+    
     // Register signal handler for clean shutdown
     signal(SIGINT) { _ in
         print("\n🛑 ChargeCap daemon terminating...")
+        ipcServer?.stop()
         exit(0)
     }
     signal(SIGTERM) { _ in
         print("\n🛑 ChargeCap daemon terminating...")
+        ipcServer?.stop()
         exit(0)
     }
     

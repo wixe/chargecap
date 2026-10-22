@@ -18,7 +18,8 @@
 * **Autonomous Micro-Sailing:** Prevents constant micro-trickling into lithium cells by letting charge gently float within an optimal hysteresis band (e.g. 47%–50% for a 50% storage limit).
 * **Thermal-Aware Chemistry Protection:** Automatically throttles or inhibits charging when battery or system thermal pressure rises, preventing additive thermal stress (charging heat + CPU/GPU load).
 * **Headless Fleet & Server Native:** Operates headlessly as a root `LaunchDaemon` without requiring any user to be logged into a desktop session.
-* **Ultra-Lightweight:** Compiled native Swift binary is **< 300 KB** with **< 10 MB RAM** footprint, zero open network ports, and 0% CPU usage.
+* **Bidirectional Unix Socket IPC:** Communicates over `/var/run/chargecap.sock` with kernel-level `getpeereid()` root verification for power control commands and zero network stack overhead.
+* **Ultra-Lightweight:** Compiled native Swift binary is **< 300 KB** with **< 10 MB RAM** footprint, zero open TCP/UDP ports, and 0% CPU usage.
 
 ---
 
@@ -32,6 +33,7 @@
 | **Micro-Sailing Mode** | 🔒 Paid Pro Paywall | **✅ Built-in & configurable** |
 | **Thermal Protection** | 🔒 Paid Pro Paywall | **✅ Built-in IOKit thermal governor** |
 | **Headless / Server Run** | ❌ Requires logged-in GUI user session | **✅ Native 24/7 root LaunchDaemon** |
+| **Unix Socket IPC** | ❌ None | **✅ `/var/run/chargecap.sock` (`getpeereid` secured)** |
 | **Open Source** | ❌ Closed source helper binary | **✅ 100% Native Swift 6** |
 
 ---
@@ -49,35 +51,35 @@ sudo ./install.sh
 
 ### 2. Manual Compilation
 ```bash
-swift build -c release
-sudo cp .build/arm64-apple-macosx/release/chargecap /usr/local/bin/
-sudo chargecap install
+swift build -c release --build-system native
+sudo ./install.sh
 ```
 
 ---
 
-## 💻 CLI Usage
+## 💻 CLI & Unix Socket Usage
 
-ChargeCap includes an intuitive command-line interface:
+ChargeCap includes a clean CLI and bidirectional Unix Domain Socket (`/var/run/chargecap.sock`):
 
 ```bash
-# Display live battery health, voltage, wattage, and governor status
+# Display live battery health, voltage, wattage, and governor status (no sudo required)
 chargecap status
 
-# Output machine-readable JSON for monitoring scripts
+# Output machine-readable JSON for monitoring scripts (no sudo required)
 chargecap status --json
 
-# Set target charge limit (e.g. 50% for 24/7 server, 80% for daily laptop)
-chargecap set 50
+# Set target charge limit (requires sudo)
+sudo chargecap set 50
 
-# Configure micro-sailing hysteresis (e.g. sail ±3% around target)
-chargecap sailing on 3
+# Configure micro-sailing hysteresis (requires sudo)
+sudo chargecap sailing on 3
 
-# Turn off sailing (strict hard cap)
-chargecap sailing off
+# Turn off sailing / strict cap (requires sudo)
+sudo chargecap sailing off
 
-# Run governor daemon in foreground (for testing/debugging)
-chargecap daemon
+# Query or control directly via Unix socket pipe
+echo "STATUS" | nc -U /var/run/chargecap.sock
+sudo sh -c 'echo "SET 50" | nc -U /var/run/chargecap.sock'
 
 # Install background 24/7 LaunchDaemon
 sudo chargecap install
@@ -96,12 +98,13 @@ Running `chargecap status` displays high-precision hardware diagnostics:
 ========================================================================
 ⚡ CHARGECAP POWER TELEMETRY & GOVERNOR
 ========================================================================
-  Battery Level:      55% (🔌 AC Connected, Holding Cap)
+  Battery Level:      55% (🔌 AC Connected (Not Charging))
   Target Limit:       50% (Micro-Sailing ±3%)
-  Health Condition:   [█████████████████░░░] 85.9%
-  Cycle Count:        120 cycles
-  Voltage & Current:  11389 mV  •  -612 mA (6.97W)
-  Hardware Capacity:  3764 / 4382 mAh
+  Governor State:     Holding Cap at 50% (Idle AC Pass-through)
+  Health Condition:   [█████████████████░░░] 86.2%
+  Cycle Count:        121 cycles
+  Voltage & Current:  11389 mV  •  0 mA (0.00W)
+  Hardware Capacity:  3777 / 4382 mAh
   Thermal State:      Nominal
   Hardware Backend:   Direct AppleSMC Driver (AC Pass-Through)
   Serial Number:      D862125AQVYPJYRA4
