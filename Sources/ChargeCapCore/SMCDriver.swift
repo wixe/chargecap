@@ -5,6 +5,8 @@ public struct SMCKeyInfoData {
     public var dataSize: UInt32 = 0
     public var dataType: UInt32 = 0
     public var dataAttributes: UInt8 = 0
+    public var reserved1: UInt8 = 0
+    public var reserved2: UInt16 = 0
 }
 
 public struct SMCParamStruct {
@@ -12,10 +14,10 @@ public struct SMCParamStruct {
     public var vers: (UInt8, UInt8, UInt8, UInt8, UInt16) = (0,0,0,0,0)
     public var pLimitData: (UInt16, UInt16, UInt32, UInt32, UInt32) = (0,0,0,0,0)
     public var keyInfo = SMCKeyInfoData()
-    public var padding: UInt8 = 0
     public var result: UInt8 = 0
     public var status: UInt8 = 0
     public var data8: UInt8 = 0
+    public var padding: UInt8 = 0
     public var data32: UInt32 = 0
     public var bytes: (UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8,
                 UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8,
@@ -74,7 +76,7 @@ public class SMCDriver {
         var outSize = MemoryLayout<SMCParamStruct>.stride
         
         let kr = IOConnectCallStructMethod(connection, 2, &input, MemoryLayout<SMCParamStruct>.stride, &output, &outSize)
-        guard kr == kIOReturnSuccess && output.result == 0 else { return nil }
+        guard kr == kIOReturnSuccess && output.result == 0 && output.keyInfo.dataSize > 0 else { return nil }
         
         var typeStr = ""
         let t = output.keyInfo.dataType
@@ -88,6 +90,23 @@ public class SMCDriver {
     }
     
     public func readByte(_ keyStr: String) -> UInt8? {
+        guard let bytes = readBytes(keyStr, count: 1), let first = bytes.first else {
+            return nil
+        }
+        return first
+    }
+    
+    public func readBytes(_ keyStr: String, count: Int? = nil) -> [UInt8]? {
+        let size: Int
+        if let count = count {
+            size = count
+        } else if let info = getKeyInfo(keyStr) {
+            size = info.size
+        } else {
+            return nil
+        }
+        guard size > 0 && size <= 32 else { return nil }
+        
         lock.lock()
         defer { lock.unlock() }
         guard connection != 0 else { return nil }
@@ -95,16 +114,25 @@ public class SMCDriver {
         var input = SMCParamStruct()
         input.key = fourCharCode(keyStr)
         input.data8 = 5 // kSMCReadKey
-        input.keyInfo.dataSize = 1
+        input.keyInfo.dataSize = UInt32(size)
         var output = SMCParamStruct()
         var outSize = MemoryLayout<SMCParamStruct>.stride
         
         let kr = IOConnectCallStructMethod(connection, 2, &input, MemoryLayout<SMCParamStruct>.stride, &output, &outSize)
         guard kr == kIOReturnSuccess && output.result == 0 else { return nil }
-        return output.bytes.0
+        
+        return withUnsafeBytes(of: &output.bytes) { rawBuf in
+            Array(rawBuf.prefix(size))
+        }
     }
     
     public func writeByte(_ keyStr: String, value: UInt8) -> Bool {
+        return writeBytes(keyStr, bytes: [value])
+    }
+    
+    public func writeBytes(_ keyStr: String, bytes: [UInt8]) -> Bool {
+        guard !bytes.isEmpty && bytes.count <= 32 else { return false }
+        
         lock.lock()
         defer { lock.unlock() }
         guard connection != 0 else { return false }
@@ -112,12 +140,27 @@ public class SMCDriver {
         var input = SMCParamStruct()
         input.key = fourCharCode(keyStr)
         input.data8 = 6 // kSMCWriteKey
-        input.keyInfo.dataSize = 1
-        input.bytes.0 = value
+        input.keyInfo.dataSize = UInt32(bytes.count)
+        withUnsafeMutableBytes(of: &input.bytes) { rawBuf in
+            for (i, b) in bytes.enumerated() {
+                rawBuf[i] = b
+            }
+        }
         var output = SMCParamStruct()
         var outSize = MemoryLayout<SMCParamStruct>.stride
         
         let kr = IOConnectCallStructMethod(connection, 2, &input, MemoryLayout<SMCParamStruct>.stride, &output, &outSize)
         return kr == kIOReturnSuccess && output.result == 0
+    }
+    
+    public func writeUInt32LE(_ keyStr: String, value: UInt32) -> Bool {
+        let le = value.littleEndian
+        let bytes: [UInt8] = [
+            UInt8(le & 0xFF),
+            UInt8((le >> 8) & 0xFF),
+            UInt8((le >> 16) & 0xFF),
+            UInt8((le >> 24) & 0xFF)
+        ]
+        return writeBytes(keyStr, bytes: bytes)
     }
 }

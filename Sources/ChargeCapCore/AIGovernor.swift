@@ -16,6 +16,7 @@ public class AIGovernor {
         self.config = config
         self.state = GovernorState.initial
         self.state.activeTarget = config.targetLimit
+        _ = self.hardware.setChargeLimitPercentage(config.targetLimit, delta: config.sailingEnabled ? config.sailingDelta : 1)
     }
     
     public func updateConfig(_ newConfig: GovernorConfig) {
@@ -24,6 +25,7 @@ public class AIGovernor {
         self.state.activeTarget = newConfig.targetLimit
         stateLock.unlock()
         _ = ConfigManager.shared.save(newConfig)
+        _ = hardware.setChargeLimitPercentage(newConfig.targetLimit, delta: newConfig.sailingEnabled ? newConfig.sailingDelta : 1)
         evaluateTick()
     }
     
@@ -32,7 +34,7 @@ public class AIGovernor {
         isRunning = true
         
         // Initial setup
-        _ = hardware.setChargeLimitPercentage(config.targetLimit)
+        _ = hardware.setChargeLimitPercentage(config.targetLimit, delta: config.sailingEnabled ? config.sailingDelta : 1)
         evaluateTick()
         
         queue.async { [weak self] in
