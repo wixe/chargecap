@@ -132,8 +132,8 @@ public class HardwareBackend {
             // 1. Firmware-managed hysteresis keys (bfF0 / bfD0 / bfE0)
             if smc.getKeyInfo("bfF0") != nil && smc.getKeyInfo("bfD0") != nil && smc.getKeyInfo("bfE0") != nil {
                 if inhibit {
-                    let upper = UInt32(max(20, min(100, currentLimit)))
-                    let lower = UInt32(max(19, Int(upper) - max(1, currentDelta)))
+                    let upper = UInt32(max(30, min(100, currentLimit)))
+                    let lower = UInt32(max(25, Int(upper) - max(1, currentDelta)))
                     _ = smc.writeByte("bfF0", value: 0x00)
                     let sUpper = smc.writeUInt32LE("bfD0", value: upper)
                     let sLower = smc.writeUInt32LE("bfE0", value: lower)
@@ -162,7 +162,7 @@ public class HardwareBackend {
             
             // 4. Intel SMC charge limit key (BCLM)
             if smc.getKeyInfo("BCLM") != nil {
-                let bclmVal: UInt8 = inhibit ? UInt8(max(20, min(100, currentLimit))) : 100
+                let bclmVal: UInt8 = inhibit ? UInt8(max(30, min(100, currentLimit))) : 100
                 return smc.writeByte("BCLM", value: bclmVal)
             }
             
@@ -181,7 +181,7 @@ public class HardwareBackend {
             if path.contains("batt") {
                 // Never use `batt adapter disable` (which cuts AC wall power and drains the battery).
                 // Use `batt limit` / `batt disable` for AC pass-through charge limiting.
-                process.arguments = inhibit ? ["limit", "\(max(20, min(100, currentLimit)))"] : ["disable"]
+                process.arguments = inhibit ? ["limit", "\(max(30, min(100, currentLimit)))"] : ["disable"]
             } else {
                 // smc -k CH0B -w <val>
                 process.arguments = ["-k", "CH0B", "-w", inhibit ? "02" : "00"]
@@ -205,7 +205,7 @@ public class HardwareBackend {
     }
     
     public func setChargeLimitPercentage(_ limit: Int, delta: Int = 3) -> Bool {
-        let clamped = max(20, min(100, limit))
+        let clamped = max(30, min(100, limit))
         self.currentLimit = clamped
         self.currentDelta = max(1, delta)
         
@@ -217,7 +217,7 @@ public class HardwareBackend {
                     return smc.writeByte("bfF0", value: 0x00)
                 }
                 let upper = UInt32(clamped)
-                let lower = UInt32(max(19, clamped - self.currentDelta))
+                let lower = UInt32(max(25, clamped - self.currentDelta))
                 _ = smc.writeByte("bfF0", value: 0x00)
                 let sUpper = smc.writeUInt32LE("bfD0", value: upper)
                 let sLower = smc.writeUInt32LE("bfE0", value: lower)
@@ -301,7 +301,7 @@ public class HardwareBackend {
     }
     
     private func applyPowerUILimit(_ requested: Int) -> Bool {
-        let target = max(20, min(100, requested))
+        let target = max(30, min(100, requested))
         
         // Fast path: if PowerUIAgent already has MCL enabled at the exact target SoC, do nothing
         if let current = getCurrentPowerUILimit(), current.enabled && current.limit == target {

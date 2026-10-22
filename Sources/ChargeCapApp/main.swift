@@ -110,16 +110,18 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         
         // Quick Presets
-        let headerPresets = NSMenuItem(title: "Charge Limit Presets", action: nil, keyEquivalent: "")
+        let headerPresets = NSMenuItem(title: "Longevity Charge Cap Presets", action: nil, keyEquivalent: "")
         headerPresets.isEnabled = false
         menu.addItem(headerPresets)
         
         let presets: [(Int, String)] = [
-            (50, "50% — Server / Always-Plugged-In Cap"),
+            (30, "30% — Minimum Safe Floor (Low-Voltage Hold)"),
+            (40, "40% — Cold Storage / Standby Cap"),
+            (50, "50% — Optimal Mid Sweet Spot (24/7 Server / Clamshell)"),
             (60, "60% — Desk / Docked Cap"),
-            (70, "70% — Balanced Cap"),
-            (80, "80% — Daily Laptop Cap"),
-            (100, "100% — Full Charge (No Cap)")
+            (70, "70% — Hybrid Desk & Portable Cap"),
+            (80, "80% — Maximum Longevity Cap (Daily Laptop)"),
+            (100, "100% — Full Charge (Bypass Cap)")
         ]
         for (limit, label) in presets {
             let item = NSMenuItem(title: label, action: #selector(selectPresetLimit(_:)), keyEquivalent: "")
@@ -180,7 +182,7 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
     @objc private func showSettingsWindow() {
         if settingsWindow == nil {
             let win = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 460, height: 390),
+                contentRect: NSRect(x: 0, y: 0, width: 460, height: 405),
                 styleMask: [.titled, .closable, .miniaturizable],
                 backing: .buffered,
                 defer: false
@@ -194,16 +196,16 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
             
             let title = NSTextField(labelWithString: "⚡ ChargeCap Power Governor")
             title.font = NSFont.boldSystemFont(ofSize: 18)
-            title.frame = NSRect(x: 24, y: 340, width: 412, height: 26)
+            title.frame = NSRect(x: 24, y: 355, width: 412, height: 26)
             content.addSubview(title)
             
             let daemonBadge = NSTextField(labelWithString: "")
             daemonBadge.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
-            daemonBadge.frame = NSRect(x: 24, y: 314, width: 412, height: 20)
+            daemonBadge.frame = NSRect(x: 24, y: 329, width: 412, height: 20)
             content.addSubview(daemonBadge)
             self.daemonBadgeLabel = daemonBadge
             
-            let battBox = NSBox(frame: NSRect(x: 24, y: 205, width: 412, height: 100))
+            let battBox = NSBox(frame: NSRect(x: 24, y: 220, width: 412, height: 100))
             battBox.title = "Live Battery & Governor Telemetry"
             content.addSubview(battBox)
             
@@ -228,28 +230,34 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
             
             let cfg = ConfigManager.shared.load()
             
-            let sliderTitle = NSTextField(labelWithString: "Target Charge Cap:")
+            let sliderTitle = NSTextField(labelWithString: "Target Charge Cap (30%–80% Longevity Range):")
             sliderTitle.font = NSFont.systemFont(ofSize: 13, weight: .medium)
-            sliderTitle.frame = NSRect(x: 24, y: 162, width: 140, height: 20)
+            sliderTitle.frame = NSRect(x: 24, y: 178, width: 340, height: 20)
             content.addSubview(sliderTitle)
             
             let valLabel = NSTextField(labelWithString: "\(cfg.targetLimit)%")
             valLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 14, weight: .bold)
-            valLabel.frame = NSRect(x: 380, y: 162, width: 56, height: 20)
+            valLabel.frame = NSRect(x: 380, y: 178, width: 56, height: 20)
             valLabel.alignment = .right
             content.addSubview(valLabel)
             self.limitValueLabel = valLabel
             
-            let slider = NSSlider(value: Double(cfg.targetLimit), minValue: 20, maxValue: 100, target: self, action: #selector(sliderChanged(_:)))
-            slider.frame = NSRect(x: 24, y: 134, width: 320, height: 24)
-            slider.numberOfTickMarks = 17
+            let slider = NSSlider(value: Double(max(30, min(100, cfg.targetLimit))), minValue: 30, maxValue: 100, target: self, action: #selector(sliderChanged(_:)))
+            slider.frame = NSRect(x: 24, y: 150, width: 320, height: 24)
+            slider.numberOfTickMarks = 15
             slider.allowsTickMarkValuesOnly = false
             content.addSubview(slider)
             self.limitSlider = slider
             
+            let tierGuideLabel = NSTextField(labelWithString: "Min Safe: 30%   •   Optimal Mid: 50%   •   Max Health: 80%   •   Full: 100%")
+            tierGuideLabel.font = NSFont.systemFont(ofSize: 10, weight: .regular)
+            tierGuideLabel.textColor = .secondaryLabelColor
+            tierGuideLabel.frame = NSRect(x: 24, y: 130, width: 412, height: 16)
+            content.addSubview(tierGuideLabel)
+            
             let applyBtn = NSButton(title: "Apply Limit", target: self, action: #selector(applySliderLimit))
             applyBtn.bezelStyle = .rounded
-            applyBtn.frame = NSRect(x: 352, y: 132, width: 88, height: 28)
+            applyBtn.frame = NSRect(x: 352, y: 148, width: 88, height: 28)
             content.addSubview(applyBtn)
             
             let deadbandCheck = NSButton(checkboxWithTitle: "Enable Hysteresis Deadband (-3% window — prevents micro-charge cycling)", target: self, action: #selector(toggleDeadbandCheckbox(_:)))
@@ -309,7 +317,7 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
     
     @objc private func sliderChanged(_ sender: NSSlider) {
         let rounded = Int((sender.doubleValue / 5.0).rounded()) * 5
-        let clamped = max(20, min(100, rounded))
+        let clamped = max(30, min(100, rounded))
         sender.integerValue = clamped
         limitValueLabel?.stringValue = "\(clamped)%"
     }

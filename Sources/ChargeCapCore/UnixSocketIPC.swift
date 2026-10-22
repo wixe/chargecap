@@ -140,8 +140,8 @@ public final class UnixSocketServer {
             guard isRootPeer else {
                 return "{\"error\":\"Permission denied: root (sudo) privileges required to control power\"}\n"
             }
-            guard parts.count >= 2, let limit = Int(parts[1]), (20...100).contains(limit) else {
-                return "{\"error\":\"Invalid limit: must be 20-100\"}\n"
+            guard parts.count >= 2, let limit = Int(parts[1]), (30...100).contains(limit) else {
+                return "{\"error\":\"Invalid limit: must be 30-100\"}\n"
             }
             var cfg = governor.config
             cfg.targetLimit = limit
@@ -167,7 +167,7 @@ public final class UnixSocketServer {
             return "{\"success\":true,\"deadband_enabled\":\(enabled),\"deadband_delta\":\(delta)}\n"
             
         default:
-            return "{\"error\":\"Unknown command. Supported: STATUS, SET <20-100>, DEADBAND <on|off> [1-10]\"}\n"
+            return "{\"error\":\"Unknown command. Supported: STATUS, SET <30-100>, DEADBAND <on|off> [1-10]\"}\n"
         }
     }
 }

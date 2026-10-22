@@ -92,8 +92,8 @@ func handleSet(args: [String]) {
         print("❌ Power control requires root privileges. Please run with sudo:\n   sudo chargecap set \(args.first ?? "50")")
         exit(1)
     }
-    guard let first = args.first, let val = Int(first), val >= 20 && val <= 100 else {
-        print("❌ Error: Please specify a valid limit between 20 and 100 (e.g. 'sudo chargecap set 50')")
+    guard let first = args.first, let val = Int(first), val >= 30 && val <= 100 else {
+        print("❌ Error: Please specify a valid limit between 30 and 100 (e.g. 'sudo chargecap set 50')")
         exit(1)
     }
     
