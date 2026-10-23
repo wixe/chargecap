@@ -74,10 +74,6 @@ echo -n "APPL????" > "$APP_BUNDLE/Contents/PkgInfo"
 
 codesign --force --deep --sign - "$APP_BUNDLE"
 
-# Provide backward compatibility for older ChargeCap updaters searching for ChargeCap.app
-cp -R "$APP_BUNDLE" "$STAGING_DIR/ChargeCap.app"
-codesign --force --deep --sign - "$STAGING_DIR/ChargeCap.app"
-
 # Create /Applications symlink for Drag-and-Drop DMG
 ln -s /Applications "$STAGING_DIR/Applications"
 
