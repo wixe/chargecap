@@ -268,7 +268,21 @@ func handleInstall() {
     </plist>
     """
     
-    let plistPath = "/Library/LaunchDaemons/com.wixe.chargecap.plist"
+    let oldPlistPath = "/Library/LaunchDaemons/com.wixe.chargecap.plist"
+    let plistPath = "/Library/LaunchDaemons/com.wixe.chargecap.daemon.plist"
+    
+    // Bootout existing legacy or current label
+    for label in ["com.wixe.chargecap", "com.wixe.chargecap.daemon"] {
+        let bootout = Process()
+        bootout.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        bootout.arguments = ["bootout", "system/\(label)"]
+        try? bootout.run()
+        bootout.waitUntilExit()
+    }
+    
+    // Remove old legacy plist so macOS BTM removes the ghost "chargecap" entry
+    try? FileManager.default.removeItem(atPath: oldPlistPath)
+    
     do {
         try plistContent.write(toFile: plistPath, atomically: true, encoding: .utf8)
         let chmod = Process()
@@ -276,15 +290,6 @@ func handleInstall() {
         chmod.arguments = ["644", plistPath]
         try? chmod.run()
         chmod.waitUntilExit()
-        
-        // Bootout existing legacy or current label
-        for label in ["com.wixe.chargecap", "com.wixe.chargecap.daemon"] {
-            let bootout = Process()
-            bootout.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-            bootout.arguments = ["bootout", "system/\(label)"]
-            try? bootout.run()
-            bootout.waitUntilExit()
-        }
         
         Thread.sleep(forTimeInterval: 0.3)
         
@@ -327,8 +332,8 @@ func handleUninstall() {
         bootout.waitUntilExit()
     }
     
-    let plistPath = "/Library/LaunchDaemons/com.wixe.chargecap.plist"
-    try? FileManager.default.removeItem(atPath: plistPath)
+    try? FileManager.default.removeItem(atPath: "/Library/LaunchDaemons/com.wixe.chargecap.daemon.plist")
+    try? FileManager.default.removeItem(atPath: "/Library/LaunchDaemons/com.wixe.chargecap.plist")
     try? FileManager.default.removeItem(atPath: "/Library/Application Support/ChargeCap")
     try? FileManager.default.removeItem(atPath: "/var/run/chargecap.sock")
     print("✅ ChargeCap LaunchDaemon uninstalled successfully.")

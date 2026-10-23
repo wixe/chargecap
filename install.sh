@@ -56,6 +56,7 @@ if [[ "$BIN_PATH" == /tmp/chargecap.* ]]; then
 fi
 
 echo "⚙️  Configuring LaunchDaemon..."
+rm -f /Library/LaunchDaemons/com.wixe.chargecap.plist 2>/dev/null || true
 "$INSTALL_DIR/chargecap" install
 
 echo "🖥  Installing ChargeCap.app to /Applications..."
