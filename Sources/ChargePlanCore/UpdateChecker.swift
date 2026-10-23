@@ -281,9 +281,14 @@ public final class UpdateChecker {
             throw UpdateError.mountFailed(attachResult.output)
         }
         
-        let sourceApp = mountDir.appendingPathComponent("ChargePlan.app")
-        guard FileManager.default.fileExists(atPath: sourceApp.path) else {
-            throw UpdateError.missingAppBundle
+        var sourceApp = mountDir.appendingPathComponent("ChargePlan.app")
+        if !FileManager.default.fileExists(atPath: sourceApp.path) {
+            let legacyApp = mountDir.appendingPathComponent("ChargeCap.app")
+            if FileManager.default.fileExists(atPath: legacyApp.path) {
+                sourceApp = legacyApp
+            } else {
+                throw UpdateError.missingAppBundle
+            }
         }
         
         progressHandler("Installing /Applications/ChargePlan.app…")
