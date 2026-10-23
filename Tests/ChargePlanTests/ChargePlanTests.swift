@@ -95,19 +95,19 @@ final class ChargePlanTests: XCTestCase {
     
     func testReleaseInfoSerialization() throws {
         let info = ReleaseInfo(
-            version: "0.4.0",
-            tagName: "v0.4.0",
-            title: "ChargePlan 0.4.0",
+            version: "0.4.1",
+            tagName: "v0.4.1",
+            title: "ChargePlan 0.4.1",
             releaseNotes: "Feature update",
-            htmlUrl: "https://github.com/wixe/chargeplan/releases/tag/v0.4.0",
+            htmlUrl: "https://github.com/wixe/chargeplan/releases/tag/v0.4.1",
             dmgUrl: "https://github.com/wixe/chargeplan/raw/main/dist/ChargePlan.dmg",
             binaryUrl: "https://raw.githubusercontent.com/wixe/chargeplan/main/bin/chargeplan",
             isNewer: true
         )
         let data = try JSONEncoder().encode(info)
         let decoded = try JSONDecoder().decode(ReleaseInfo.self, from: data)
-        XCTAssertEqual(decoded.version, "0.4.0")
-        XCTAssertEqual(decoded.tagName, "v0.4.0")
+        XCTAssertEqual(decoded.version, "0.4.1")
+        XCTAssertEqual(decoded.tagName, "v0.4.1")
         XCTAssertTrue(decoded.isNewer)
     }
 }
