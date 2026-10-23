@@ -48,6 +48,7 @@ public class BatteryMonitor {
         var amperageMA = 0
         var designCapacity = 0
         var fullCapacity = 0
+        var remainingCapacity = 0
         var nominalCapacity = 0
         var wattage = 0.0
         var notChargingReason = 0
@@ -81,9 +82,14 @@ public class BatteryMonitor {
                     designCapacity = bdata["DesignCapacity"] as? Int ?? 0
                     fullCapacity = bdata["FullChargeCapacity"] as? Int ?? 0
                     nominalCapacity = bdata["NominalChargeCapacity"] as? Int ?? 0
+                    remainingCapacity = bdata["RemainingCapacity"] as? Int ?? 0
                     if percent == 0, let cap = bdata["CurrentCapacity"] as? Int {
                         percent = cap
                     }
+                }
+                
+                if remainingCapacity == 0, let cur = dict["CurrentCapacity"] as? Int, cur > 100 {
+                    remainingCapacity = cur
                 }
                 
                 if let cdata = dict["ChargerData"] as? [String: Any] {
@@ -114,6 +120,12 @@ public class BatteryMonitor {
             if health > 100.0 { health = 100.0 }
         }
         
+        var exactPercent = Double(percent)
+        if fullCapacity > 0 && remainingCapacity > 0 {
+            let raw = (Double(remainingCapacity) / Double(fullCapacity)) * 100.0
+            exactPercent = max(0.0, min(100.0, (raw * 100.0).rounded() / 100.0))
+        }
+        
         let tState = ProcessInfo.processInfo.thermalState
         let thermalString: String
         switch tState {
@@ -126,6 +138,7 @@ public class BatteryMonitor {
         
         return BatteryStatus(
             percent: percent,
+            exactPercent: exactPercent,
             isCharging: isCharging,
             isACConnected: isACConnected,
             isFullyCharged: isFullyCharged,
@@ -135,6 +148,7 @@ public class BatteryMonitor {
             wattageW: wattage,
             designCapacityMAh: designCapacity,
             fullChargeCapacityMAh: fullCapacity,
+            remainingCapacityMAh: remainingCapacity,
             nominalCapacityMAh: nominalCapacity,
             healthPercent: (health * 10).rounded() / 10.0,
             timeRemainingMinutes: timeRemaining,

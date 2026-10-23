@@ -7,12 +7,17 @@ final class ChargePlanTests: XCTestCase {
         let status = monitor.getCurrentStatus()
         XCTAssertGreaterThanOrEqual(status.percent, 0)
         XCTAssertLessThanOrEqual(status.percent, 100)
+        XCTAssertGreaterThanOrEqual(status.exactPercent, 0.0)
+        XCTAssertLessThanOrEqual(status.exactPercent, 100.0)
         XCTAssertFalse(status.serialNumber.isEmpty)
     }
     
     func testConfigManager() {
         let cfg = GovernorConfig.default
         XCTAssertEqual(cfg.targetLimit, 50)
+        XCTAssertTrue(cfg.driftEnabled)
+        XCTAssertEqual(cfg.driftMargin, 3)
+        // Backwards compatibility alias
         XCTAssertTrue(cfg.deadbandEnabled)
         XCTAssertEqual(cfg.deadbandDelta, 3)
     }
@@ -27,8 +32,8 @@ final class ChargePlanTests: XCTestCase {
     func testConfigSerialization() throws {
         let cfg = GovernorConfig(
             targetLimit: 80,
-            deadbandEnabled: false,
-            deadbandDelta: 5,
+            driftEnabled: false,
+            driftMargin: 5,
             thermalProtectionEnabled: true,
             autoServerMode: false,
             pollIntervalSeconds: 10.0
@@ -36,8 +41,28 @@ final class ChargePlanTests: XCTestCase {
         let data = try JSONEncoder().encode(cfg)
         let decoded = try JSONDecoder().decode(GovernorConfig.self, from: data)
         XCTAssertEqual(decoded.targetLimit, 80)
+        XCTAssertFalse(decoded.driftEnabled)
+        XCTAssertEqual(decoded.driftMargin, 5)
+        // Backwards compatibility alias
         XCTAssertFalse(decoded.deadbandEnabled)
         XCTAssertEqual(decoded.deadbandDelta, 5)
+    }
+    
+    func testLegacyDeadbandConfigDecoding() throws {
+        let legacyJson = """
+        {
+            "targetLimit": 60,
+            "deadbandEnabled": true,
+            "deadbandDelta": 4,
+            "thermalProtectionEnabled": true,
+            "autoServerMode": true,
+            "pollIntervalSeconds": 5.0
+        }
+        """.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(GovernorConfig.self, from: legacyJson)
+        XCTAssertEqual(decoded.targetLimit, 60)
+        XCTAssertTrue(decoded.driftEnabled)
+        XCTAssertEqual(decoded.driftMargin, 4)
     }
     
     func testSMCParamStructLayout() {

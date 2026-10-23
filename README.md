@@ -16,7 +16,7 @@
 
 * **Closed-Loop Hardware Verification:** Instead of writing a charge target once and hoping the hardware remembers it after sleep, lid closing, or USB-C PD negotiation, ChargePlan monitors system power events and continuously re-asserts your configured limit.
 * **True AC Pass-Through:** Inhibits cell charging while powering system load directly from the wall adapter (`0 mA` battery current, `0.00W` battery stress) without cutting AC input.
-* **Hysteresis Deadband Control:** Prevents constant micro-trickling into lithium cells by allowing State of Charge (SoC) to float naturally within a configurable window (e.g. 47%–50% for a 50% storage limit).
+* **Drift Margin Control:** Prevents constant micro-trickling into lithium cells by allowing State of Charge (SoC) to float naturally within a configurable window (e.g. 47%–50% for a 50% storage limit).
 * **Thermal-Aware Chemistry Protection:** Automatically throttles or pauses charging when system or battery thermal pressure rises, reducing additive heat stress.
 * **Menu Bar App & Background Service:** Includes a native macOS Menu Bar app (`ChargePlan.app`) with a live Settings dashboard alongside a standard macOS system service so limits remain enforced even when logged out or sleeping.
 * **Local IPC Control:** Communicates locally via `/var/run/chargeplan.sock` with standard POSIX peer credential validation, keeping controls secure without opening any network ports.
@@ -30,7 +30,7 @@
 | :--- | :--- |
 | **Control Loop Architecture** | Closed-loop power event observer + periodic hardware register verification |
 | **Power Path Routing** | Hardware AC Pass-Through (`AppleSmartBatteryManager` / system power management) |
-| **Charge Regulation** | Configurable target setpoint (30%–100%) with **Hysteresis Deadband** (`±1%` to `±10%`) |
+| **Charge Regulation** | Configurable target setpoint (30%–100%) with **Drift Margin** (`±1%` to `±10%`) |
 | **Thermal Protection** | Automatic charge inhibition under elevated IOKit thermal pressure |
 | **Security & Access** | Non-privileged read telemetry; administrative group or console ownership for setting limits |
 | **IPC Transport** | Local POSIX domain socket (`/var/run/chargeplan.sock`) with standard timeouts |
@@ -80,11 +80,11 @@ chargeplan status --json
 # Set target charge limit (requires sudo or running daemon)
 chargeplan set 50
 
-# Configure hysteresis deadband (requires sudo or running daemon)
-chargeplan deadband on 3
+# Configure drift margin (requires sudo or running daemon)
+chargeplan drift on 3
 
-# Turn off hysteresis deadband / strict cap (requires sudo or running daemon)
-chargeplan deadband off
+# Turn off drift margin / strict cap (requires sudo or running daemon)
+chargeplan drift off
 
 # Query or control directly via local socket
 echo "STATUS" | nc -U /var/run/chargeplan.sock
@@ -112,7 +112,7 @@ Running `chargeplan status` displays high-precision hardware diagnostics:
 ⚡ CHARGEPLAN POWER TELEMETRY & GOVERNOR
 ========================================================================
   Battery Level:      55% (🔌 AC Connected (Not Charging))
-  Target Limit:       50% (Deadband -3%)
+  Target Limit:       50% (Drift -3%)
   Governor State:     Holding Cap at 50% (Idle AC Pass-through)
   Health Condition:   [██████████████████░░] 86.2%
   Cycle Count:        121 cycles
@@ -133,8 +133,8 @@ Configuration is stored at `/etc/chargeplan.json` (or `~/.config/chargeplan/conf
 ```json
 {
   "autoServerMode": true,
-  "deadbandDelta": 3,
-  "deadbandEnabled": true,
+  "driftMargin": 3,
+  "driftEnabled": true,
   "pollIntervalSeconds": 5.0,
   "targetLimit": 50,
   "thermalProtectionEnabled": true

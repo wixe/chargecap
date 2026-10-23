@@ -15,7 +15,7 @@ func printHelp() {
     COMMANDS:
       status [--json]           Display battery health, power telemetry, and governor status
       set <limit>               Set target charge limit (e.g. 50, 80)
-      deadband <on|off> [delta] Configure hysteresis deadband (e.g. deadband on 3)
+      drift <on|off> [margin]   Configure drift margin (e.g. drift on 3)
       daemon                    Run the power governor in the foreground
       install                   Install background system service (keeps limit active when sleeping or logged out)
       uninstall                 Remove background system service
@@ -25,7 +25,7 @@ func printHelp() {
     EXAMPLES:
       chargeplan status
       sudo chargeplan set 50
-      sudo chargeplan deadband on 3
+      sudo chargeplan drift on 3
       sudo chargeplan install
       sudo chargeplan update
     """)
@@ -75,13 +75,13 @@ func handleStatus(jsonOutput: Bool) {
     ========================================================================
     ⚡ CHARGEPLAN POWER TELEMETRY & GOVERNOR
     ========================================================================
-      Battery Level:      \(status.percent)% (\(chargingStr))
-      Target Limit:       \(cfg.targetLimit)% \(cfg.deadbandEnabled ? "(Deadband -\(cfg.deadbandDelta)%)" : "(Strict)")
+      Battery Level:      \(String(format: "%.2f%%", status.exactPercent)) (\(chargingStr))
+      Target Limit:       \(cfg.targetLimit)% \(cfg.driftEnabled ? "(Drift -\(cfg.driftMargin)%)" : "(Strict)")
       Governor State:     \(governorMode)
       Health Condition:   [\(bar)] \(status.healthPercent)%
       Cycle Count:        \(status.cycleCount) cycles
       Voltage & Current:  \(status.voltageMV) mV  •  \(status.amperageMA) mA (\(wattageStr))
-      Hardware Capacity:  \(status.fullChargeCapacityMAh) / \(status.designCapacityMAh) mAh
+      Hardware Capacity:  \(status.remainingCapacityMAh > 0 ? "\(status.remainingCapacityMAh) / " : "")\(status.fullChargeCapacityMAh) / \(status.designCapacityMAh) mAh
       Thermal State:      \(status.thermalState)
       Hardware Backend:   \(hw.modeName)
       Serial Number:      \(status.serialNumber)
@@ -122,47 +122,49 @@ func handleSet(args: [String]) {
     cfg.targetLimit = val
     if ConfigManager.shared.save(cfg) {
         let hw = HardwareBackend()
-        _ = hw.setChargeLimitPercentage(val, delta: cfg.deadbandEnabled ? cfg.deadbandDelta : 1)
+        _ = hw.setChargeLimitPercentage(val, delta: cfg.driftEnabled ? cfg.driftMargin : 1)
         print("✅ Saved target charge limit: \(val)%")
     } else {
         print("⚠️ Warning: Could not write configuration. Try running with 'sudo'.")
     }
 }
 
-func handleDeadband(args: [String]) {
+func handleDrift(args: [String]) {
     guard let first = args.first?.lowercased() else {
-        print("❌ Usage: chargeplan deadband <on|off> [delta_percent]")
+        print("❌ Usage: chargeplan drift <on|off> [margin_percent]")
         exit(1)
     }
     
     let enabled = (first == "on" || first == "true" || first == "1")
-    var delta = 3
-    if args.count > 1, let d = Int(args[1]), (1...10).contains(d) {
-        delta = d
+    var margin = 3
+    if args.count > 1, let m = Int(args[1]), (1...10).contains(m) {
+        margin = m
     }
     
     // 1. If background daemon is running, send command via socket (zero-sudo for console user / root)
-    if let resp = UnixSocketClient.send("DEADBAND \(enabled ? "on" : "off") \(delta)") {
+    if let resp = UnixSocketClient.send("DRIFT \(enabled ? "on" : "off") \(margin)") {
         if resp.contains("\"success\":true") {
-            print("✅ Hysteresis deadband updated via socket: \(enabled ? "ENABLED (-\(delta)%)" : "DISABLED")")
+            print("✅ Drift margin updated via socket: \(enabled ? "ENABLED (-\(margin)%)" : "DISABLED")")
             return
         } else if resp.contains("Permission denied") {
-            print("❌ Permission denied by daemon. Please run with sudo: sudo chargeplan deadband \(args.joined(separator: " "))")
+            print("❌ Permission denied by daemon. Please run with sudo: sudo chargeplan drift \(args.joined(separator: " "))")
             exit(1)
         }
     }
     
     // 2. Direct modification requires root if daemon is not running
     guard getuid() == 0 else {
-        print("❌ Power control requires root privileges (or start background daemon with 'sudo chargeplan install'):\n   sudo chargeplan deadband \(args.joined(separator: " "))")
+        print("❌ Power control requires root privileges (or start background daemon with 'sudo chargeplan install'):\n   sudo chargeplan drift \(args.joined(separator: " "))")
         exit(1)
     }
     
     var cfg = ConfigManager.shared.load()
-    cfg.deadbandEnabled = enabled
-    cfg.deadbandDelta = delta
+    cfg.driftEnabled = enabled
+    cfg.driftMargin = margin
     if ConfigManager.shared.save(cfg) {
-        print("✅ Hysteresis deadband updated: \(enabled ? "ENABLED (-\(delta)%)" : "DISABLED")")
+        let hw = HardwareBackend()
+        _ = hw.setChargeLimitPercentage(cfg.targetLimit, delta: enabled ? margin : 1)
+        print("✅ Drift margin updated: \(enabled ? "ENABLED (-\(margin)%)" : "DISABLED")")
     } else {
         print("⚠️ Warning: Could not write configuration. Try running with 'sudo'.")
     }
@@ -461,8 +463,8 @@ case "status":
     handleStatus(jsonOutput: isJson)
 case "set":
     handleSet(args: Array(args.dropFirst()))
-case "deadband":
-    handleDeadband(args: Array(args.dropFirst()))
+case "drift", "deadband":
+    handleDrift(args: Array(args.dropFirst()))
 case "daemon":
     handleDaemon()
 case "install":

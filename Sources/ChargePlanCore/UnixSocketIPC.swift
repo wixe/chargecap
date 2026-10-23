@@ -167,23 +167,23 @@ public final class UnixSocketServer {
             governor.updateConfig(cfg)
             return "{\"success\":true,\"target_limit\":\(limit)}\n"
             
-        case "DEADBAND":
+        case "DRIFT", "DEADBAND":
             guard isAuthorized else {
                 return "{\"error\":\"Permission denied: console user, admin, or root (sudo) privileges required to control power\"}\n"
             }
             guard parts.count >= 2 else {
-                return "{\"error\":\"Usage: DEADBAND <on|off> [delta]\"}\n"
+                return "{\"error\":\"Usage: DRIFT <on|off> [margin]\"}\n"
             }
             let enabled = ["on", "true", "1"].contains(parts[1].lowercased())
-            var delta = governor.config.deadbandDelta
-            if parts.count >= 3, let d = Int(parts[2]), (1...10).contains(d) {
-                delta = d
+            var margin = governor.config.driftMargin
+            if parts.count >= 3, let m = Int(parts[2]), (1...10).contains(m) {
+                margin = m
             }
             var cfg = governor.config
-            cfg.deadbandEnabled = enabled
-            cfg.deadbandDelta = delta
+            cfg.driftEnabled = enabled
+            cfg.driftMargin = margin
             governor.updateConfig(cfg)
-            return "{\"success\":true,\"deadband_enabled\":\(enabled),\"deadband_delta\":\(delta)}\n"
+            return "{\"success\":true,\"drift_enabled\":\(enabled),\"drift_margin\":\(margin),\"deadband_enabled\":\(enabled),\"deadband_delta\":\(margin)}\n"
             
         case "UPGRADE":
             var sourcePath = "/Applications/ChargePlan.app/Contents/Resources/chargeplan"
@@ -349,7 +349,7 @@ public final class UnixSocketServer {
             return "{\"success\":true,\"message\":\"ChargePlan.app and daemon updated successfully.\"}\n"
             
         default:
-            return "{\"error\":\"Unknown command. Supported: STATUS, SET <30-100>, DEADBAND <on|off> [1-10], UPGRADE [path], INSTALL_APP <path>\"}\n"
+            return "{\"error\":\"Unknown command. Supported: STATUS, SET <30-100>, DRIFT <on|off> [1-10], UPGRADE [path], INSTALL_APP <path>\"}\n"
         }
     }
 }
