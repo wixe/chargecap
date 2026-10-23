@@ -294,79 +294,48 @@ public class HardwareBackend {
         return unsafeBitCast(method_getImplementation(method), to: SetFn.self)(client, setSel, target, &err)
     }
     
-    private func applyPowerUILimit(_ requested: Int) -> Bool {
-        let target = max(30, min(100, requested))
+    private func triggerPowerUIRefresh() {
+        // 1. Post Darwin notification that PowerUIAgent listens for
+        let notifyProc = Process()
+        notifyProc.executableURL = URL(fileURLWithPath: "/usr/bin/notifyutil")
+        notifyProc.arguments = ["-p", "com.apple.smartcharging.defaultschanged"]
+        try? notifyProc.run()
+        notifyProc.waitUntilExit()
         
-        // Fast path: if PowerUIAgent already has MCL enabled at the exact target SoC, do nothing
+        // 2. Notify system powerd to re-evaluate power source routing immediately
+        let powerdNotify = Process()
+        powerdNotify.executableURL = URL(fileURLWithPath: "/usr/bin/notifyutil")
+        powerdNotify.arguments = ["-p", "com.apple.system.powersources.source"]
+        try? powerdNotify.run()
+        powerdNotify.waitUntilExit()
+        
+        // 3. If running as root (the daemon), send HUP to PowerUIAgent to force
+        // an instant latch into "AC attached; not charging" without a physical cable pull.
+        if geteuid() == 0 {
+            let killProc = Process()
+            killProc.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
+            killProc.arguments = ["-HUP", "PowerUIAgent"]
+            try? killProc.run()
+            killProc.waitUntilExit()
+        }
+    }
+    
+    private func applyPowerUILimit(_ requested: Int) -> Bool {
+        // Clamp to nearest valid hardware limit supported by PowerUI (80, 85, 90, 95, 100)
+        let target = nearestPowerUILimit(requested)
+        
+        // Fast path: if PowerUIAgent already has MCL enabled at the exact target SoC, ensure refreshed and return
         if let current = getCurrentPowerUILimit(), current.enabled && current.limit == target {
             return true
         }
         
-        // Standard limits (80, 85, 90, 95, 100) can be applied directly via XPC
-        if powerUIAvailableLimits.contains(target) {
-            return setDirectXPCMCLLimit(UInt8(target))
-        }
+        let success = setDirectXPCMCLLimit(UInt8(target))
         
-        // Sub-80% limits on macOS 27+:
-        // The 80–100 range check lives only in the XPC setMCLLimit: handler.
-        // Writing mclLimitValue into com.apple.smartcharging.topoffprotection (root) and
-        // posting com.apple.smartcharging.defaultschanged causes PowerUIAgent to reload
-        // preferences and forward the value to powerd unvalidated. This engages the
-        // firmware SoC ceiling with true AC pass-through (~0 mA) and holds through sleep.
-        if geteuid() == 0 {
-            // Ensure the feature is armed first (any valid value is fine)
-            if getCurrentPowerUILimit()?.enabled != true {
-                _ = setDirectXPCMCLLimit(80)
-            }
-            
-            let domain = "com.apple.smartcharging.topoffprotection" as CFString
-            let numTarget = NSNumber(value: target)
-            let numOne = NSNumber(value: 1)
-            CFPreferencesSetValue("mclLimitValue" as CFString, numTarget, domain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
-            CFPreferencesSetValue("MCLSavedTargetSoC" as CFString, numTarget, domain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
-            CFPreferencesSetValue("MCLFeatureState" as CFString, numOne, domain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
-            CFPreferencesSetValue("enabled" as CFString, numOne, domain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
-            CFPreferencesSetValue("currentState" as CFString, numOne, domain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
-            _ = CFPreferencesSynchronize(domain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
-            
-            // Also write the root plist directly (PowerUIAgent reads this)
-            let plistPath = "/var/root/Library/Preferences/com.apple.smartcharging.topoffprotection.plist"
-            let dict = NSMutableDictionary(contentsOfFile: plistPath) ?? NSMutableDictionary()
-            dict["mclLimitValue"] = target
-            dict["MCLSavedTargetSoC"] = target
-            dict["MCLFeatureState"] = 1
-            dict["enabled"] = 1
-            dict["currentState"] = 1
-            _ = dict.write(toFile: plistPath, atomically: true)
-            
-            // Post the Darwin notification that triggers PowerUIAgent reload (preferred over kill)
-            let notifyProc = Process()
-            notifyProc.executableURL = URL(fileURLWithPath: "/usr/bin/notifyutil")
-            notifyProc.arguments = ["-p", "com.apple.smartcharging.defaultschanged"]
-            try? notifyProc.run()
-            notifyProc.waitUntilExit()
-            
-            // Fallback: restart agent if notification alone is not sufficient
-            Thread.sleep(forTimeInterval: 0.5)
-            if let updated = getCurrentPowerUILimit(), updated.limit == target {
-                return true
-            }
-            
-            let killProc = Process()
-            killProc.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
-            killProc.arguments = ["PowerUIAgent"]
-            try? killProc.run()
-            killProc.waitUntilExit()
-            
-            Thread.sleep(forTimeInterval: 0.6)
-            self.setupPowerUI()
-            if let updated = getCurrentPowerUILimit(), updated.limit == target {
-                return true
-            }
-            return true
-        }
+        // Software refresh kick: forces powerd and PowerUIAgent to latch into
+        // "AC attached; not charging" immediately without needing to unplug and replug.
+        triggerPowerUIRefresh()
         
-        return setDirectXPCMCLLimit(UInt8(nearestPowerUILimit(target)))
+        return success
     }
     
     private func disablePowerUILimit() -> Bool {
@@ -378,6 +347,10 @@ public class HardwareBackend {
         guard let method = class_getInstanceMethod(cls, disSel) else { return false }
         typealias DisFn = @convention(c) (AnyObject, Selector, UnsafeMutablePointer<NSError?>) -> Bool
         var err: NSError? = nil
-        return unsafeBitCast(method_getImplementation(method), to: DisFn.self)(client, disSel, &err)
+        let res = unsafeBitCast(method_getImplementation(method), to: DisFn.self)(client, disSel, &err)
+        if res {
+            triggerPowerUIRefresh()
+        }
+        return res
     }
 }

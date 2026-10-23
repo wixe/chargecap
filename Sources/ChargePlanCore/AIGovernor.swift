@@ -86,10 +86,12 @@ public class AIGovernor {
         }
         
         let target = config.targetLimit
-        let lowerBound = max(20, target - (config.driftEnabled ? config.driftMargin : 1))
+        let target = config.targetLimit
         let isNative = hardware.modeName.contains("Native PowerUI")
+        let effectiveTarget = isNative ? max(80, target) : target
+        let lowerBound = max(20, effectiveTarget - (config.driftEnabled ? config.driftMargin : 1))
         
-        // On the macOS 27 native PowerUI path the firmware owns the SoC ceiling.
+        // On the macOS native PowerUI path the firmware owns the SoC ceiling.
         // Disabling the limit when the percentage dips a few points re-enables charging
         // and creates unnecessary cycles. Keep the ceiling sticky and only re-assert it.
         if isNative {
@@ -98,21 +100,22 @@ public class AIGovernor {
                 let success = hardware.setChargeLimitPercentage(target, delta: config.driftEnabled ? config.driftMargin : 1)
                 state.isChargingInhibited = true
                 state.lastActionTimestamp = Date()
-                state.lastActionReason = "Native SoC limit re-asserted at \(target)%"
+                state.lastActionReason = "Native SoC limit re-asserted at \(effectiveTarget)%"
                 if !success { state.consecutiveErrors += 1 }
             }
             
-            if status.percent >= target {
+            let floorSuffix = target < 80 ? " (Apple 80% Hardware Floor)" : ""
+            if status.percent >= effectiveTarget {
                 state.inDrift = true
                 state.modeDescription = status.amperageMA == 0
-                    ? "Holding Cap at \(target)% (Idle AC Pass-Through)"
-                    : "Holding Cap at \(target)% (AC Pass-Through)"
+                    ? "Holding Cap at \(effectiveTarget)%\(floorSuffix) (Idle AC Pass-Through)"
+                    : "Holding Cap at \(effectiveTarget)%\(floorSuffix) (AC Pass-Through)"
             } else if status.percent <= lowerBound && config.driftEnabled {
                 // Firmware will top up on its own; we do not disable the limit.
                 state.inDrift = false
-                state.modeDescription = "Native limit armed — battery at \(status.percent)% (firmware may top up)"
+                state.modeDescription = "Native limit armed at \(effectiveTarget)%\(floorSuffix) — battery at \(status.percent)% (topping up)"
             } else {
-                state.modeDescription = "Native SoC ceiling active at \(target)% (\(status.percent)%)"
+                state.modeDescription = "Native SoC ceiling active at \(effectiveTarget)%\(floorSuffix) (\(status.percent)%)"
             }
             return
         }
