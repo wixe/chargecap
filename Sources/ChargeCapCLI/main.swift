@@ -184,13 +184,14 @@ func handleInstall() {
         exit(1)
     }
     
+    let selfPath = CommandLine.arguments[0]
     let binSource: String
-    if FileManager.default.fileExists(atPath: "/usr/local/bin/chargecap") {
+    if FileManager.default.isExecutableFile(atPath: selfPath) && !selfPath.contains("ChargeCapDaemon") {
+        binSource = selfPath
+    } else if FileManager.default.fileExists(atPath: "/usr/local/bin/chargecap") {
         binSource = "/usr/local/bin/chargecap"
-    } else if FileManager.default.fileExists(atPath: "/opt/homebrew/bin/chargecap") {
-        binSource = "/opt/homebrew/bin/chargecap"
     } else {
-        binSource = CommandLine.arguments[0]
+        binSource = selfPath
     }
     
     let daemonDir = "/Library/Application Support/ChargeCap"
@@ -371,7 +372,28 @@ func handleUpdate(args: [String]) {
             return
         }
         
-        guard getuid() == 0 else {
+        if getuid() != 0 {
+            // Check if user has write access to /Applications/ChargeCap.app and daemon socket is active
+            let appPath = "/Applications/ChargeCap.app"
+            let appWritable = FileManager.default.isWritableFile(atPath: appPath) || FileManager.default.isWritableFile(atPath: "/Applications")
+            let socketActive = FileManager.default.fileExists(atPath: "/var/run/chargecap.sock")
+            if appWritable && socketActive && !info.dmgUrl.isEmpty {
+                print("⚡ Updating ChargeCap.app and background daemon via root IPC (no sudo required)…")
+                do {
+                    guard let dmgUrl = URL(string: info.dmgUrl) else {
+                        print("❌ Invalid DMG URL: \(info.dmgUrl)")
+                        exit(1)
+                    }
+                    try await UpdateChecker.installAppUpdate(dmgUrl: dmgUrl, relaunch: false) { step in
+                        print("   → \(step)")
+                    }
+                    print("✅ ChargeCap successfully updated to \(info.tagName)!")
+                    return
+                } catch {
+                    print("⚠️ Non-root update could not complete (\(error.localizedDescription)). Retrying with sudo requirement.")
+                }
+            }
+            
             print("❌ Root privileges required to install update. Please run:\n   sudo chargecap update")
             exit(1)
         }

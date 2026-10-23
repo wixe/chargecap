@@ -166,8 +166,69 @@ public final class UnixSocketServer {
             governor.updateConfig(cfg)
             return "{\"success\":true,\"deadband_enabled\":\(enabled),\"deadband_delta\":\(delta)}\n"
             
+        case "UPGRADE":
+            var sourcePath = "/Applications/ChargeCap.app/Contents/Resources/chargecap"
+            if parts.count >= 2 {
+                sourcePath = parts[1]
+            }
+            
+            // Security verification: source must reside inside /Applications/ or caller must be root
+            if !isRootPeer && !sourcePath.hasPrefix("/Applications/") {
+                return "{\"error\":\"Permission denied: source binary must be inside /Applications/ or caller must be root\"}\n"
+            }
+            
+            guard FileManager.default.isExecutableFile(atPath: sourcePath) else {
+                return "{\"error\":\"Source binary does not exist or is not executable: \(sourcePath)\"}\n"
+            }
+            
+            guard let attrs = try? FileManager.default.attributesOfItem(atPath: sourcePath),
+                  let fileSize = attrs[.size] as? Int64, fileSize > 50_000 else {
+                return "{\"error\":\"Source binary is invalid or corrupt\"}\n"
+            }
+            
+            let daemonDir = "/Library/Application Support/ChargeCap"
+            let daemonBin = "\(daemonDir)/ChargeCapDaemon"
+            let cliBin = "/usr/local/bin/chargecap"
+            
+            try? FileManager.default.createDirectory(atPath: daemonDir, withIntermediateDirectories: true)
+            try? FileManager.default.createDirectory(atPath: "/usr/local/bin", withIntermediateDirectories: true)
+            
+            // Atomically install the new binary to both locations
+            let p1 = Process()
+            p1.executableURL = URL(fileURLWithPath: "/usr/bin/install")
+            p1.arguments = ["-m", "755", sourcePath, daemonBin]
+            try? p1.run()
+            p1.waitUntilExit()
+            
+            let p2 = Process()
+            p2.executableURL = URL(fileURLWithPath: "/usr/bin/install")
+            p2.arguments = ["-m", "755", sourcePath, cliBin]
+            try? p2.run()
+            p2.waitUntilExit()
+            
+            for path in [daemonBin, cliBin] {
+                let xattr = Process()
+                xattr.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")
+                xattr.arguments = ["-cr", path]
+                try? xattr.run()
+                xattr.waitUntilExit()
+                
+                let cs = Process()
+                cs.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+                cs.arguments = ["--force", "--sign", "-", path]
+                try? cs.run()
+                cs.waitUntilExit()
+            }
+            
+            // Allow socket response to flush before exit so launchd KeepAlive restarts with new binary
+            DispatchQueue.global().asyncAfter(deadline: .now() + 0.15) {
+                exit(0)
+            }
+            
+            return "{\"success\":true,\"message\":\"ChargeCapDaemon & CLI updated. Restarting via launchd...\"}\n"
+            
         default:
-            return "{\"error\":\"Unknown command. Supported: STATUS, SET <30-100>, DEADBAND <on|off> [1-10]\"}\n"
+            return "{\"error\":\"Unknown command. Supported: STATUS, SET <30-100>, DEADBAND <on|off> [1-10], UPGRADE [path]\"}\n"
         }
     }
 }

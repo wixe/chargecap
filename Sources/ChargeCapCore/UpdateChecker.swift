@@ -1,1 +1,405 @@
-FULL_CONTENT_HERE
+import Foundation
+
+public let ChargeCapVersion = "0.3.1"
+
+public struct ReleaseInfo: Codable, Equatable {
+    public let version: String
+    public let tagName: String
+    public let title: String
+    public let releaseNotes: String
+    public let htmlUrl: String
+    public let dmgUrl: String
+    public let binaryUrl: String
+    public let isNewer: Bool
+    
+    public init(
+        version: String,
+        tagName: String,
+        title: String,
+        releaseNotes: String,
+        htmlUrl: String,
+        dmgUrl: String,
+        binaryUrl: String,
+        isNewer: Bool
+    ) {
+        self.version = version
+        self.tagName = tagName
+        self.title = title
+        self.releaseNotes = releaseNotes
+        self.htmlUrl = htmlUrl
+        self.dmgUrl = dmgUrl
+        self.binaryUrl = binaryUrl
+        self.isNewer = isNewer
+    }
+}
+
+public enum UpdateError: LocalizedError {
+    case networkError(String)
+    case parsingError(String)
+    case mountFailed(String)
+    case missingAppBundle
+    case copyFailed(String)
+    case rootRequired
+    case commandFailed(String)
+    
+    public var errorDescription: String? {
+        switch self {
+        case .networkError(let msg): return "Network error: \(msg)"
+        case .parsingError(let msg): return "Failed to parse release information: \(msg)"
+        case .mountFailed(let msg): return "Failed to mount update disk image: \(msg)"
+        case .missingAppBundle: return "Downloaded disk image does not contain ChargeCap.app"
+        case .copyFailed(let msg): return "Failed to install ChargeCap.app: \(msg)"
+        case .rootRequired: return "Root privileges are required to update the daemon binary (run with sudo)"
+        case .commandFailed(let msg): return "System command failed: \(msg)"
+        }
+    }
+}
+
+public final class UpdateChecker {
+    private static let repoOwner = "wixe"
+    private static let repoName = "chargecap"
+    
+    private static let lastCheckKey = "com.wixe.chargecap.lastUpdateCheck"
+    private static let cachedReleaseKey = "com.wixe.chargecap.cachedReleaseInfo"
+    private static let checkIntervalSeconds: TimeInterval = 86400 // 24 hours
+    
+    /// Compares two semver version strings (e.g. "0.2.0" vs "v0.3.0").
+    public static func compareVersion(_ v1: String, _ v2: String) -> ComparisonResult {
+        let clean1 = v1.trimmingCharacters(in: CharacterSet(charactersIn: "vV \t\r\n"))
+        let clean2 = v2.trimmingCharacters(in: CharacterSet(charactersIn: "vV \t\r\n"))
+        
+        let parts1 = clean1.split(separator: ".").compactMap { Int($0) }
+        let parts2 = clean2.split(separator: ".").compactMap { Int($0) }
+        
+        let maxLen = max(parts1.count, parts2.count)
+        for i in 0..<maxLen {
+            let p1 = i < parts1.count ? parts1[i] : 0
+            let p2 = i < parts2.count ? parts2[i] : 0
+            if p1 < p2 { return .orderedAscending }
+            if p1 > p2 { return .orderedDescending }
+        }
+        return .orderedSame
+    }
+    
+    public static func isVersion(_ v1: String, newerThan v2: String) -> Bool {
+        return compareVersion(v1, v2) == .orderedDescending
+    }
+    
+    public static func clearCache() {
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: lastCheckKey)
+        defaults.removeObject(forKey: cachedReleaseKey)
+    }
+    
+    /// Queries GitHub for the latest release or tags. Throttled to once every 24 hours unless `force: true`.
+    public static func checkForUpdate(currentVersion: String = ChargeCapVersion, force: Bool = false) async -> ReleaseInfo? {
+        let defaults = UserDefaults.standard
+        
+        if !force, let lastCheck = defaults.object(forKey: lastCheckKey) as? Date {
+            if Date().timeIntervalSince(lastCheck) < checkIntervalSeconds {
+                if let cachedData = defaults.data(forKey: cachedReleaseKey),
+                   let cached = try? JSONDecoder().decode(ReleaseInfo.self, from: cachedData) {
+                    let currentlyNewer = isVersion(cached.version, newerThan: currentVersion)
+                    if cached.isNewer != currentlyNewer {
+                        let updated = ReleaseInfo(
+                            version: cached.version,
+                            tagName: cached.tagName,
+                            title: cached.title,
+                            releaseNotes: cached.releaseNotes,
+                            htmlUrl: cached.htmlUrl,
+                            dmgUrl: cached.dmgUrl,
+                            binaryUrl: cached.binaryUrl,
+                            isNewer: currentlyNewer
+                        )
+                        persistCache(updated)
+                        return updated
+                    }
+                    return cached
+                }
+                return nil
+            }
+        }
+        
+        // 1. First attempt: Query GitHub Releases (/releases/latest)
+        if let info = await fetchLatestRelease(currentVersion: currentVersion) {
+            persistCache(info)
+            return info
+        }
+        
+        // 2. Fallback attempt: Query GitHub Tags (/tags)
+        if let info = await fetchLatestTag(currentVersion: currentVersion) {
+            persistCache(info)
+            return info
+        }
+        
+        defaults.set(Date(), forKey: lastCheckKey)
+        return nil
+    }
+    
+    private static func persistCache(_ info: ReleaseInfo) {
+        let defaults = UserDefaults.standard
+        defaults.set(Date(), forKey: lastCheckKey)
+        if let data = try? JSONEncoder().encode(info) {
+            defaults.set(data, forKey: cachedReleaseKey)
+        }
+    }
+    
+    private static func fetchLatestRelease(currentVersion: String) async -> ReleaseInfo? {
+        guard let url = URL(string: "https://api.github.com/repos/\(repoOwner)/\(repoName)/releases/latest") else {
+            return nil
+        }
+        
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 4.0
+        request.setValue("ChargeCap-Updater", forHTTPHeaderField: "User-Agent")
+        request.setValue("application/vnd.github.v3+json", forHTTPHeaderField: "Accept")
+        
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                return nil
+            }
+            
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let tagName = json["tag_name"] as? String else {
+                return nil
+            }
+            
+            let cleanVer = tagName.trimmingCharacters(in: CharacterSet(charactersIn: "vV \t\r\n"))
+            let isNewer = isVersion(cleanVer, newerThan: currentVersion)
+            let title = json["name"] as? String ?? "ChargeCap \(tagName)"
+            let body = json["body"] as? String ?? ""
+            let htmlUrl = json["html_url"] as? String ?? "https://github.com/\(repoOwner)/\(repoName)/releases"
+            
+            var dmgUrl = "https://github.com/\(repoOwner)/\(repoName)/raw/main/dist/ChargeCap.dmg"
+            if let assets = json["assets"] as? [[String: Any]] {
+                for asset in assets {
+                    if let name = asset["name"] as? String, name.hasSuffix(".dmg"),
+                       let downloadUrl = asset["browser_download_url"] as? String {
+                        dmgUrl = downloadUrl
+                        break
+                    }
+                }
+            }
+            let binaryUrl = "https://raw.githubusercontent.com/\(repoOwner)/\(repoName)/main/bin/chargecap"
+            
+            return ReleaseInfo(
+                version: cleanVer,
+                tagName: tagName,
+                title: title,
+                releaseNotes: body,
+                htmlUrl: htmlUrl,
+                dmgUrl: dmgUrl,
+                binaryUrl: binaryUrl,
+                isNewer: isNewer
+            )
+        } catch {
+            return nil
+        }
+    }
+    
+    private static func fetchLatestTag(currentVersion: String) async -> ReleaseInfo? {
+        guard let url = URL(string: "https://api.github.com/repos/\(repoOwner)/\(repoName)/tags") else {
+            return nil
+        }
+        
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 4.0
+        request.setValue("ChargeCap-Updater", forHTTPHeaderField: "User-Agent")
+        request.setValue("application/vnd.github.v3+json", forHTTPHeaderField: "Accept")
+        
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                return nil
+            }
+            
+            guard let tags = try JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+                  let first = tags.first,
+                  let tagName = first["name"] as? String else {
+                return nil
+            }
+            
+            let cleanVer = tagName.trimmingCharacters(in: CharacterSet(charactersIn: "vV \t\r\n"))
+            let isNewer = isVersion(cleanVer, newerThan: currentVersion)
+            let title = "ChargeCap \(tagName)"
+            let htmlUrl = "https://github.com/\(repoOwner)/\(repoName)/releases/tag/\(tagName)"
+            let dmgUrl = "https://github.com/\(repoOwner)/\(repoName)/raw/main/dist/ChargeCap.dmg"
+            let binaryUrl = "https://raw.githubusercontent.com/\(repoOwner)/\(repoName)/main/bin/chargecap"
+            
+            return ReleaseInfo(
+                version: cleanVer,
+                tagName: tagName,
+                title: title,
+                releaseNotes: "Latest release available on GitHub.",
+                htmlUrl: htmlUrl,
+                dmgUrl: dmgUrl,
+                binaryUrl: binaryUrl,
+                isNewer: isNewer
+            )
+        } catch {
+            return nil
+        }
+    }
+    
+    // MARK: - App Installation & Swap
+    
+    /// Downloads the DMG, extracts ChargeCap.app, replaces /Applications/ChargeCap.app, and optionally relaunches.
+    public static func installAppUpdate(dmgUrl: URL, relaunch: Bool = true, progressHandler: @escaping (String) -> Void) async throws {
+        progressHandler("Downloading update disk image…")
+        
+        let tempDmg = URL(fileURLWithPath: "/tmp/ChargeCap-update-\(UUID().uuidString).dmg")
+        defer { try? FileManager.default.removeItem(at: tempDmg) }
+        
+        var request = URLRequest(url: dmgUrl)
+        request.timeoutInterval = 30.0
+        request.setValue("ChargeCap-Updater", forHTTPHeaderField: "User-Agent")
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw UpdateError.networkError("HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)")
+        }
+        
+        try data.write(to: tempDmg)
+        
+        progressHandler("Mounting update disk image…")
+        let mountDir = URL(fileURLWithPath: "/tmp/chargecap-mnt-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: mountDir, withIntermediateDirectories: true)
+        defer {
+            _ = runProcess("/usr/bin/hdiutil", ["detach", mountDir.path, "-quiet"])
+            try? FileManager.default.removeItem(at: mountDir)
+        }
+        
+        let attachResult = runProcess("/usr/bin/hdiutil", ["attach", tempDmg.path, "-mountpoint", mountDir.path, "-nobrowse", "-quiet"])
+        guard attachResult.exitCode == 0 else {
+            throw UpdateError.mountFailed(attachResult.output)
+        }
+        
+        let sourceApp = mountDir.appendingPathComponent("ChargeCap.app")
+        guard FileManager.default.fileExists(atPath: sourceApp.path) else {
+            throw UpdateError.missingAppBundle
+        }
+        
+        progressHandler("Installing /Applications/ChargeCap.app…")
+        let destApp = URL(fileURLWithPath: "/Applications/ChargeCap.app")
+        
+        // Remove existing app bundle if present
+        if FileManager.default.fileExists(atPath: destApp.path) {
+            try? FileManager.default.removeItem(at: destApp)
+        }
+        
+        // Copy new app bundle
+        let copyResult = runProcess("/bin/cp", ["-R", sourceApp.path, destApp.path])
+        guard copyResult.exitCode == 0 else {
+            throw UpdateError.copyFailed(copyResult.output)
+        }
+        
+        // Strip quarantine and re-sign ad-hoc
+        _ = runProcess("/usr/bin/xattr", ["-cr", destApp.path])
+        _ = runProcess("/usr/bin/codesign", ["--force", "--deep", "--sign", "-", destApp.path])
+        
+        // Detach volume
+        _ = runProcess("/usr/bin/hdiutil", ["detach", mountDir.path, "-quiet"])
+        
+        // Automatically sync background daemon and CLI binaries with the newly installed app
+        let bundledCLI = destApp.appendingPathComponent("Contents/Resources/chargecap").path
+        if FileManager.default.isExecutableFile(atPath: bundledCLI) {
+            progressHandler("Automatically updating background daemon & CLI…")
+            // 1. If daemon is running, trigger seamless zero-password socket UPGRADE
+            if let resp = UnixSocketClient.send("UPGRADE \(bundledCLI)"), resp.contains("\"success\":true") {
+                progressHandler("Background daemon updated and restarted.")
+            } else if getuid() == 0 {
+                // 2. If running as root (e.g. CLI update), copy directly
+                let daemonDir = "/Library/Application Support/ChargeCap"
+                let daemonBin = "\(daemonDir)/ChargeCapDaemon"
+                let cliBin = "/usr/local/bin/chargecap"
+                try? FileManager.default.createDirectory(atPath: daemonDir, withIntermediateDirectories: true)
+                try? FileManager.default.createDirectory(atPath: "/usr/local/bin", withIntermediateDirectories: true)
+                _ = runProcess("/usr/bin/install", ["-m", "755", bundledCLI, daemonBin])
+                _ = runProcess("/usr/bin/install", ["-m", "755", bundledCLI, cliBin])
+                _ = runProcess("/usr/bin/xattr", ["-cr", daemonBin])
+                _ = runProcess("/usr/bin/xattr", ["-cr", cliBin])
+                _ = runProcess("/usr/bin/codesign", ["--force", "--sign", "-", daemonBin])
+                _ = runProcess("/usr/bin/codesign", ["--force", "--sign", "-", cliBin])
+                _ = runProcess("/bin/launchctl", ["kickstart", "-k", "system/com.wixe.chargecap.daemon"])
+            }
+        }
+        
+        // Clear cached update so newly launched app checks current status cleanly
+        clearCache()
+        
+        if relaunch {
+            progressHandler("Relaunching ChargeCap…")
+            let relaunchProc = Process()
+            relaunchProc.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+            relaunchProc.arguments = ["-n", destApp.path]
+            try? relaunchProc.run()
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                exit(0)
+            }
+        }
+    }
+    
+    // MARK: - CLI & Daemon Installation
+    
+    /// Updates /usr/local/bin/chargecap and reloads the root LaunchDaemon. Requires root privileges.
+    public static func installCLIUpdate(binaryUrl: URL, progressHandler: @escaping (String) -> Void) async throws {
+        guard getuid() == 0 else {
+            throw UpdateError.rootRequired
+        }
+        
+        progressHandler("Downloading latest chargecap binary…")
+        let tempBin = URL(fileURLWithPath: "/tmp/chargecap-update-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: tempBin) }
+        
+        var request = URLRequest(url: binaryUrl)
+        request.timeoutInterval = 30.0
+        request.setValue("ChargeCap-Updater", forHTTPHeaderField: "User-Agent")
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw UpdateError.networkError("HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)")
+        }
+        try data.write(to: tempBin)
+        
+        progressHandler("Installing ChargeCapDaemon & CLI…")
+        let daemonDir = "/Library/Application Support/ChargeCap"
+        let daemonBin = "\(daemonDir)/ChargeCapDaemon"
+        try? FileManager.default.createDirectory(atPath: daemonDir, withIntermediateDirectories: true)
+        _ = runProcess("/usr/bin/install", ["-m", "755", tempBin.path, daemonBin])
+        _ = runProcess("/usr/bin/xattr", ["-cr", daemonBin])
+        _ = runProcess("/usr/bin/codesign", ["--force", "--sign", "-", daemonBin])
+        
+        // Also install /usr/local/bin/chargecap
+        let dest = "/usr/local/bin/chargecap"
+        _ = runProcess("/usr/bin/install", ["-m", "755", tempBin.path, dest])
+        _ = runProcess("/usr/bin/xattr", ["-cr", dest])
+        _ = runProcess("/usr/bin/codesign", ["--force", "--sign", "-", dest])
+        
+        progressHandler("Restarting LaunchDaemon…")
+        _ = runProcess("/bin/launchctl", ["kickstart", "-k", "system/com.wixe.chargecap.daemon"])
+        _ = runProcess("/bin/launchctl", ["kickstart", "-k", "system/com.wixe.chargecap"])
+        
+        // Clear cached update
+        clearCache()
+    }
+    
+    private static func runProcess(_ path: String, _ args: [String]) -> (exitCode: Int32, output: String) {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: path)
+        p.arguments = args
+        let pipe = Pipe()
+        p.standardOutput = pipe
+        p.standardError = pipe
+        do {
+            try p.run()
+            p.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let output = String(data: data, encoding: .utf8) ?? ""
+            return (p.terminationStatus, output)
+        } catch {
+            return (-1, error.localizedDescription)
+        }
+    }
+}

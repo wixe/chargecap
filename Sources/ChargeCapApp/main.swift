@@ -23,6 +23,7 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
     // Update state & controls
     private var latestRelease: ReleaseInfo?
     private var isUpdatingApp: Bool = false
+    private var isAutoSyncingDaemon: Bool = false
     private var updateStatusText: String = ""
     private var updateBox: NSBox?
     private var updateLabel: NSTextField?
@@ -52,6 +53,9 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
         
         rebuildMenu()
         
+        // Automatically ensure background daemon binary matches this app version
+        autoSyncDaemonIfNeeded()
+        
         // Background check for updates (cached 24h, 0 overhead)
         Task {
             await checkUpdateSilently()
@@ -64,6 +68,7 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
         
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 4.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
+                self?.autoSyncDaemonIfNeeded()
                 self?.rebuildMenu()
                 self?.refreshSettingsWindow()
             }
@@ -388,6 +393,36 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
         return false
     }
     
+    private func autoSyncDaemonIfNeeded() {
+        guard !isAutoSyncingDaemon else { return }
+        let daemonInfo = fetchDaemonStatus()
+        guard daemonInfo.running else { return }
+        let upToDate = isDaemonBinaryUpToDate(runningDaemonVersion: daemonInfo.version)
+        guard !upToDate else { return }
+        
+        isAutoSyncingDaemon = true
+        let bundled = bundledCLIBinaryPath()
+        
+        Task {
+            // 1. Try seamless zero-password socket UPGRADE first
+            if let resp = UnixSocketClient.send("UPGRADE \(bundled)"), resp.contains("\"success\":true") {
+                try? await Task.sleep(nanoseconds: 600_000_000)
+                await MainActor.run {
+                    self.isAutoSyncingDaemon = false
+                    self.rebuildMenu()
+                    self.refreshSettingsWindow()
+                }
+                return
+            }
+            
+            // 2. Fallback to privileged install if older running daemon does not support socket UPGRADE
+            await MainActor.run {
+                self.installDaemonAction()
+                self.isAutoSyncingDaemon = false
+            }
+        }
+    }
+    
     private func refreshSettingsWindow() {
         guard settingsWindow != nil else { return }
         let status = monitor.getCurrentStatus()
@@ -402,9 +437,15 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
             daemonBadgeLabel?.textColor = .systemGreen
             installDaemonButton?.title = "Reinstall / Restart Daemon"
         } else if daemonActive && !upToDate {
-            daemonBadgeLabel?.stringValue = "⚠️ Daemon Update Available — Click 'Update Background Daemon' below"
-            daemonBadgeLabel?.textColor = .systemOrange
-            installDaemonButton?.title = "Update Background Daemon"
+            if isAutoSyncingDaemon {
+                daemonBadgeLabel?.stringValue = "⚡ Automatically Updating Background Daemon…"
+                daemonBadgeLabel?.textColor = .systemBlue
+                installDaemonButton?.title = "Updating Daemon…"
+            } else {
+                daemonBadgeLabel?.stringValue = "⚠️ Daemon Update Available — Auto-updating…"
+                daemonBadgeLabel?.textColor = .systemOrange
+                installDaemonButton?.title = "Update Background Daemon"
+            }
         } else {
             daemonBadgeLabel?.stringValue = "⚠️ Background Daemon Not Running — Click 'Install Background Daemon' below"
             daemonBadgeLabel?.textColor = .systemOrange
