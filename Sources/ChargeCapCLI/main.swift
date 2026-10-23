@@ -1,7 +1,7 @@
 import Foundation
 import ChargeCapCore
 
-let VERSION = "0.2.0"
+let VERSION = ChargeCapVersion
 
 func printHelp() {
     print("""
@@ -19,6 +19,7 @@ func printHelp() {
       daemon                    Run the AI power management governor in the foreground
       install                   Install and bootstrap background LaunchDaemon (runs 24/7 as root)
       uninstall                 Remove and unload background LaunchDaemon
+      update [--check|--force]  Check GitHub and automatically upgrade binary and .app
       version                   Print version information
     
     EXAMPLES:
@@ -26,6 +27,7 @@ func printHelp() {
       sudo chargecap set 50
       sudo chargecap deadband on 3
       sudo chargecap install
+      sudo chargecap update
     """)
 }
 
@@ -85,6 +87,12 @@ func handleStatus(jsonOutput: Bool) {
       Serial Number:      \(status.serialNumber)
     ========================================================================
     """)
+    
+    if let cachedData = UserDefaults.standard.data(forKey: "com.wixe.chargecap.cachedReleaseInfo"),
+       let cached = try? JSONDecoder().decode(ReleaseInfo.self, from: cachedData),
+       cached.isNewer {
+        print("💡 Update available: \(cached.tagName) — Run 'sudo chargecap update' to upgrade.\n")
+    }
 }
 
 func handleSet(args: [String]) {
@@ -268,6 +276,70 @@ func handleUninstall() {
     print("✅ ChargeCap LaunchDaemon uninstalled successfully.")
 }
 
+func handleUpdate(args: [String]) {
+    let checkOnly = args.contains("--check")
+    let force = args.contains("--force")
+    
+    print("🔍 Checking GitHub for updates (current version: v\(VERSION))...")
+    
+    let semaphore = DispatchSemaphore(value: 0)
+    Task {
+        defer { semaphore.signal() }
+        guard let info = await UpdateChecker.checkForUpdate(currentVersion: VERSION, force: true) else {
+            print("⚠️ Could not fetch update information from GitHub (offline or rate-limited).")
+            return
+        }
+        
+        if !info.isNewer && !force {
+            print("✅ ChargeCap is already up to date! (v\(VERSION))")
+            return
+        }
+        
+        print("""
+        ========================================================================
+        ⬆️  New version available: \(info.tagName) (Current: v\(VERSION))
+        ========================================================================
+        \(info.releaseNotes.isEmpty ? "No release notes provided." : info.releaseNotes)
+        ========================================================================
+        """)
+        
+        if checkOnly {
+            print("Run 'sudo chargecap update' to install.")
+            return
+        }
+        
+        guard getuid() == 0 else {
+            print("❌ Root privileges required to install update. Please run:\n   sudo chargecap update")
+            exit(1)
+        }
+        
+        do {
+            guard let binUrl = URL(string: info.binaryUrl) else {
+                print("❌ Invalid binary download URL: \(info.binaryUrl)")
+                exit(1)
+            }
+            try await UpdateChecker.installCLIUpdate(binaryUrl: binUrl) { step in
+                print("   → \(step)")
+            }
+            
+            // If /Applications/ChargeCap.app exists, update it too
+            if FileManager.default.fileExists(atPath: "/Applications/ChargeCap.app"),
+               let dmgUrl = URL(string: info.dmgUrl) {
+                print("🖥  Updating /Applications/ChargeCap.app...")
+                try await UpdateChecker.installAppUpdate(dmgUrl: dmgUrl, relaunch: false) { step in
+                    print("   → \(step)")
+                }
+            }
+            
+            print("✅ ChargeCap successfully updated to \(info.tagName)!")
+        } catch {
+            print("❌ Update failed: \(error.localizedDescription)")
+            exit(1)
+        }
+    }
+    semaphore.wait()
+}
+
 let args = Array(CommandLine.arguments.dropFirst())
 guard let command = args.first?.lowercased() else {
     handleStatus(jsonOutput: false)
@@ -288,6 +360,8 @@ case "install":
     handleInstall()
 case "uninstall":
     handleUninstall()
+case "update":
+    handleUpdate(args: Array(args.dropFirst()))
 case "version", "--version", "-v":
     print("ChargeCap version \(VERSION)")
 case "help", "--help", "-h":

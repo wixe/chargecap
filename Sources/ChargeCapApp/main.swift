@@ -20,6 +20,15 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
     private var installDaemonButton: NSButton?
     private var uninstallDaemonButton: NSButton?
     
+    // Update state & controls
+    private var latestRelease: ReleaseInfo?
+    private var isUpdatingApp: Bool = false
+    private var updateStatusText: String = ""
+    private var updateBox: NSBox?
+    private var updateLabel: NSTextField?
+    private var updateSubLabel: NSTextField?
+    private var updateActionButton: NSButton?
+    
     private let monitor = BatteryMonitor()
     private lazy var fallbackHardware = HardwareBackend()
     private let launchAgentPath: String = {
@@ -42,6 +51,11 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
         }
         
         rebuildMenu()
+        
+        // Background check for updates (cached 24h, 0 overhead)
+        Task {
+            await checkUpdateSilently()
+        }
         
         // Show the Settings / Dashboard window if launched interactively (not via --background Login Agent)
         if !CommandLine.arguments.contains("--background") {
@@ -89,6 +103,18 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
         let titleItem = NSMenuItem(title: "⚡ ChargeCap Battery Governor", action: nil, keyEquivalent: "")
         titleItem.isEnabled = false
         menu.addItem(titleItem)
+        
+        if let rel = latestRelease, rel.isNewer {
+            let updateItem = NSMenuItem(title: "⬆️ Update Available (\(rel.tagName))…", action: #selector(triggerAppUpdate), keyEquivalent: "")
+            updateItem.target = self
+            menu.addItem(updateItem)
+            menu.addItem(.separator())
+        } else {
+            let latestItem = NSMenuItem(title: "✓ ChargeCap v\(ChargeCapVersion) (Latest)", action: nil, keyEquivalent: "")
+            latestItem.isEnabled = false
+            menu.addItem(latestItem)
+            menu.addItem(.separator())
+        }
         
         let stateStr = status.isCharging ? "Charging" : (status.isACConnected ? "AC Pass-Through (On Hold)" : "On Battery")
         let wattageStr = String(format: "%.1fW", abs(status.wattageW))
@@ -152,6 +178,10 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
         openSettingsItem.target = self
         menu.addItem(openSettingsItem)
         
+        let checkUpdateItem = NSMenuItem(title: "Check for Updates…", action: #selector(menuCheckForUpdates), keyEquivalent: "")
+        checkUpdateItem.target = self
+        menu.addItem(checkUpdateItem)
+        
         let loginItem = NSMenuItem(title: "Start Menu Bar Icon at Login", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
         loginItem.target = self
         loginItem.state = isLaunchAtLoginEnabled() ? .on : .off
@@ -182,7 +212,7 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
     @objc private func showSettingsWindow() {
         if settingsWindow == nil {
             let win = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 460, height: 405),
+                contentRect: NSRect(x: 0, y: 0, width: 460, height: 475),
                 styleMask: [.titled, .closable, .miniaturizable],
                 backing: .buffered,
                 defer: false
@@ -196,16 +226,16 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
             
             let title = NSTextField(labelWithString: "⚡ ChargeCap Power Governor")
             title.font = NSFont.boldSystemFont(ofSize: 18)
-            title.frame = NSRect(x: 24, y: 355, width: 412, height: 26)
+            title.frame = NSRect(x: 24, y: 425, width: 412, height: 26)
             content.addSubview(title)
             
             let daemonBadge = NSTextField(labelWithString: "")
             daemonBadge.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
-            daemonBadge.frame = NSRect(x: 24, y: 329, width: 412, height: 20)
+            daemonBadge.frame = NSRect(x: 24, y: 399, width: 412, height: 20)
             content.addSubview(daemonBadge)
             self.daemonBadgeLabel = daemonBadge
             
-            let battBox = NSBox(frame: NSRect(x: 24, y: 220, width: 412, height: 100))
+            let battBox = NSBox(frame: NSRect(x: 24, y: 290, width: 412, height: 100))
             battBox.title = "Live Battery & Governor Telemetry"
             content.addSubview(battBox)
             
@@ -232,18 +262,18 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
             
             let sliderTitle = NSTextField(labelWithString: "Target Charge Cap (30%–80% Longevity Range):")
             sliderTitle.font = NSFont.systemFont(ofSize: 13, weight: .medium)
-            sliderTitle.frame = NSRect(x: 24, y: 178, width: 340, height: 20)
+            sliderTitle.frame = NSRect(x: 24, y: 248, width: 340, height: 20)
             content.addSubview(sliderTitle)
             
             let valLabel = NSTextField(labelWithString: "\(cfg.targetLimit)%")
             valLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 14, weight: .bold)
-            valLabel.frame = NSRect(x: 380, y: 178, width: 56, height: 20)
+            valLabel.frame = NSRect(x: 380, y: 248, width: 56, height: 20)
             valLabel.alignment = .right
             content.addSubview(valLabel)
             self.limitValueLabel = valLabel
             
             let slider = NSSlider(value: Double(max(30, min(100, cfg.targetLimit))), minValue: 30, maxValue: 100, target: self, action: #selector(sliderChanged(_:)))
-            slider.frame = NSRect(x: 24, y: 150, width: 320, height: 24)
+            slider.frame = NSRect(x: 24, y: 220, width: 320, height: 24)
             slider.numberOfTickMarks = 15
             slider.allowsTickMarkValuesOnly = false
             content.addSubview(slider)
@@ -252,35 +282,60 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
             let tierGuideLabel = NSTextField(labelWithString: "Min Safe: 30%   •   Optimal Mid: 50%   •   Max Health: 80%   •   Full: 100%")
             tierGuideLabel.font = NSFont.systemFont(ofSize: 10, weight: .regular)
             tierGuideLabel.textColor = .secondaryLabelColor
-            tierGuideLabel.frame = NSRect(x: 24, y: 130, width: 412, height: 16)
+            tierGuideLabel.frame = NSRect(x: 24, y: 200, width: 412, height: 16)
             content.addSubview(tierGuideLabel)
             
             let applyBtn = NSButton(title: "Apply Limit", target: self, action: #selector(applySliderLimit))
             applyBtn.bezelStyle = .rounded
-            applyBtn.frame = NSRect(x: 352, y: 148, width: 88, height: 28)
+            applyBtn.frame = NSRect(x: 352, y: 218, width: 88, height: 28)
             content.addSubview(applyBtn)
             
             let deadbandCheck = NSButton(checkboxWithTitle: "Enable Hysteresis Deadband (-3% window — prevents micro-charge cycling)", target: self, action: #selector(toggleDeadbandCheckbox(_:)))
             deadbandCheck.state = cfg.deadbandEnabled ? .on : .off
-            deadbandCheck.frame = NSRect(x: 24, y: 98, width: 416, height: 22)
+            deadbandCheck.frame = NSRect(x: 24, y: 172, width: 416, height: 22)
             content.addSubview(deadbandCheck)
             self.deadbandCheckbox = deadbandCheck
             
             let loginCheck = NSButton(checkboxWithTitle: "Show ChargeCap icon in macOS Menu Bar automatically at login", target: self, action: #selector(toggleLaunchAtLogin))
             loginCheck.state = isLaunchAtLoginEnabled() ? .on : .off
-            loginCheck.frame = NSRect(x: 24, y: 70, width: 416, height: 22)
+            loginCheck.frame = NSRect(x: 24, y: 146, width: 416, height: 22)
             content.addSubview(loginCheck)
             self.loginCheckbox = loginCheck
             
+            // Software Updates Box
+            let uBox = NSBox(frame: NSRect(x: 24, y: 64, width: 412, height: 74))
+            uBox.title = "Software Updates & Version"
+            content.addSubview(uBox)
+            self.updateBox = uBox
+            
+            let uLabel = NSTextField(labelWithString: "ChargeCap v\(ChargeCapVersion)")
+            uLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+            uLabel.frame = NSRect(x: 12, y: 30, width: 265, height: 20)
+            uBox.contentView?.addSubview(uLabel)
+            self.updateLabel = uLabel
+            
+            let uSub = NSTextField(labelWithString: "You are on the latest version.")
+            uSub.font = NSFont.systemFont(ofSize: 11, weight: .regular)
+            uSub.textColor = .secondaryLabelColor
+            uSub.frame = NSRect(x: 12, y: 8, width: 265, height: 18)
+            uBox.contentView?.addSubview(uSub)
+            self.updateSubLabel = uSub
+            
+            let uBtn = NSButton(title: "Check Updates", target: self, action: #selector(updateActionButtonClicked))
+            uBtn.bezelStyle = .rounded
+            uBtn.frame = NSRect(x: 285, y: 12, width: 115, height: 32)
+            uBox.contentView?.addSubview(uBtn)
+            self.updateActionButton = uBtn
+            
             let installBtn = NSButton(title: "Install / Update Background Daemon", target: self, action: #selector(installDaemonAction))
             installBtn.bezelStyle = .rounded
-            installBtn.frame = NSRect(x: 24, y: 20, width: 235, height: 32)
+            installBtn.frame = NSRect(x: 24, y: 18, width: 235, height: 32)
             content.addSubview(installBtn)
             self.installDaemonButton = installBtn
             
             let uninstallBtn = NSButton(title: "Uninstall Daemon", target: self, action: #selector(uninstallDaemonAction))
             uninstallBtn.bezelStyle = .rounded
-            uninstallBtn.frame = NSRect(x: 270, y: 20, width: 166, height: 32)
+            uninstallBtn.frame = NSRect(x: 270, y: 18, width: 166, height: 32)
             content.addSubview(uninstallBtn)
             self.uninstallDaemonButton = uninstallBtn
             
@@ -330,6 +385,27 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
         deadbandCheckbox?.state = cfg.deadbandEnabled ? .on : .off
         loginCheckbox?.state = isLaunchAtLoginEnabled() ? .on : .off
         uninstallDaemonButton?.isEnabled = daemonActive
+        
+        // Update software updates section
+        if isUpdatingApp {
+            updateLabel?.stringValue = "⚡ Updating ChargeCap…"
+            updateLabel?.textColor = .systemBlue
+            updateSubLabel?.stringValue = updateStatusText
+            updateActionButton?.title = "Updating…"
+            updateActionButton?.isEnabled = false
+        } else if let rel = latestRelease, rel.isNewer {
+            updateLabel?.stringValue = "🎉 Update Available: \(rel.tagName)"
+            updateLabel?.textColor = .systemOrange
+            updateSubLabel?.stringValue = updateStatusText.isEmpty ? "New version ready to install." : updateStatusText
+            updateActionButton?.title = "Update Now"
+            updateActionButton?.isEnabled = true
+        } else {
+            updateLabel?.stringValue = "✓ ChargeCap v\(ChargeCapVersion) (Latest)"
+            updateLabel?.textColor = .systemGreen
+            updateSubLabel?.stringValue = updateStatusText.isEmpty ? "Up to date (Checked automatically)." : updateStatusText
+            updateActionButton?.title = "Check Updates"
+            updateActionButton?.isEnabled = true
+        }
     }
     
     @objc private func sliderChanged(_ sender: NSSlider) {
@@ -465,6 +541,95 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
         setLaunchAtLogin(!isLaunchAtLoginEnabled())
         rebuildMenu()
         refreshSettingsWindow()
+    }
+    
+    private func checkUpdateSilently(force: Bool = false) async {
+        if let info = await UpdateChecker.checkForUpdate(currentVersion: ChargeCapVersion, force: force) {
+            await MainActor.run {
+                self.latestRelease = info
+                self.rebuildMenu()
+                self.refreshSettingsWindow()
+            }
+        }
+    }
+    
+    @objc private func updateActionButtonClicked() {
+        if let release = latestRelease, release.isNewer {
+            triggerAppUpdate()
+        } else {
+            manualCheckUpdate()
+        }
+    }
+    
+    @objc private func triggerAppUpdate() {
+        showSettingsWindow()
+        guard let release = latestRelease, release.isNewer else { return }
+        guard let dmgUrl = URL(string: release.dmgUrl) else { return }
+        
+        isUpdatingApp = true
+        updateStatusText = "Downloading update disk image…"
+        refreshSettingsWindow()
+        
+        Task { [weak self] in
+            guard let self = self else { return }
+            do {
+                try await UpdateChecker.installAppUpdate(dmgUrl: dmgUrl, relaunch: true) { [weak self] step in
+                    Task { @MainActor in
+                        self?.updateStatusText = step
+                        self?.refreshSettingsWindow()
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    self.isUpdatingApp = false
+                    self.updateStatusText = "Update failed: \(error.localizedDescription)"
+                    self.refreshSettingsWindow()
+                }
+            }
+        }
+    }
+    
+    @objc private func menuCheckForUpdates() {
+        manualCheckUpdate(showAlertIfUpToDate: true)
+    }
+    
+    @objc private func manualCheckUpdate() {
+        manualCheckUpdate(showAlertIfUpToDate: true)
+    }
+    
+    private func manualCheckUpdate(showAlertIfUpToDate: Bool = false) {
+        updateStatusText = "Checking GitHub…"
+        updateActionButton?.isEnabled = false
+        refreshSettingsWindow()
+        Task {
+            let info = await UpdateChecker.checkForUpdate(currentVersion: ChargeCapVersion, force: true)
+            await MainActor.run {
+                self.latestRelease = info
+                self.updateActionButton?.isEnabled = true
+                let formatter = DateFormatter()
+                formatter.timeStyle = .short
+                let timeStr = formatter.string(from: Date())
+                
+                if info?.isNewer == true {
+                    self.updateStatusText = "New release found: \(info!.tagName)"
+                    self.rebuildMenu()
+                    self.refreshSettingsWindow()
+                    self.showSettingsWindow()
+                } else {
+                    self.updateStatusText = "✓ Up to date (checked at \(timeStr))"
+                    self.rebuildMenu()
+                    self.refreshSettingsWindow()
+                    if showAlertIfUpToDate {
+                        let alert = NSAlert()
+                        alert.messageText = "ChargeCap is Up to Date"
+                        alert.informativeText = "Version \(ChargeCapVersion) is currently the newest version available."
+                        alert.alertStyle = .informational
+                        alert.addButton(withTitle: "OK")
+                        alert.runModal()
+                    }
+                }
+            }
+        }
     }
     
     @objc private func quitApp() {

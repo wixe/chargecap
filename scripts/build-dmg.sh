@@ -35,7 +35,9 @@ strip -x "$APP_BUNDLE/Contents/MacOS/ChargeCapApp"
 cp "$SCRIPT_DIR/bin/chargecap" "$APP_BUNDLE/Contents/Resources/chargecap"
 chmod 755 "$APP_BUNDLE/Contents/MacOS/ChargeCapApp" "$APP_BUNDLE/Contents/Resources/chargecap"
 
-cat > "$APP_BUNDLE/Contents/Info.plist" << 'EOF'
+VERSION="$(grep 'public let ChargeCapVersion =' Sources/ChargeCapCore/UpdateChecker.swift | cut -d '"' -f2)"
+
+cat > "$APP_BUNDLE/Contents/Info.plist" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -55,9 +57,9 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << 'EOF'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.2.0</string>
+    <string>$VERSION</string>
     <key>CFBundleVersion</key>
-    <string>2</string>
+    <string>$VERSION</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>LSUIElement</key>

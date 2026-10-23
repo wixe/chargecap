@@ -53,4 +53,36 @@ final class ChargeCapTests: XCTestCase {
         XCTAssertEqual(MemoryLayout<SMCParamStruct>.offset(of: \.data32), 44)
         XCTAssertEqual(MemoryLayout<SMCParamStruct>.offset(of: \.bytes), 48)
     }
+    
+    func testUpdateSemverComparison() {
+        XCTAssertEqual(UpdateChecker.compareVersion("0.2.0", "0.2.0"), .orderedSame)
+        XCTAssertEqual(UpdateChecker.compareVersion("0.3.0", "0.2.0"), .orderedDescending)
+        XCTAssertEqual(UpdateChecker.compareVersion("0.2.0", "0.3.0"), .orderedAscending)
+        XCTAssertEqual(UpdateChecker.compareVersion("v1.0.0", "0.9.9"), .orderedDescending)
+        XCTAssertEqual(UpdateChecker.compareVersion("0.2.1", "0.2.0"), .orderedDescending)
+        XCTAssertEqual(UpdateChecker.compareVersion("0.2", "0.2.0"), .orderedSame)
+        XCTAssertEqual(UpdateChecker.compareVersion("1.0.0", "v1.0.0"), .orderedSame)
+        
+        XCTAssertTrue(UpdateChecker.isVersion("0.3.0", newerThan: "0.2.0"))
+        XCTAssertFalse(UpdateChecker.isVersion("0.2.0", newerThan: "0.2.0"))
+        XCTAssertFalse(UpdateChecker.isVersion("0.1.9", newerThan: "0.2.0"))
+    }
+    
+    func testReleaseInfoSerialization() throws {
+        let info = ReleaseInfo(
+            version: "0.3.0",
+            tagName: "v0.3.0",
+            title: "ChargeCap 0.3.0",
+            releaseNotes: "Feature update",
+            htmlUrl: "https://github.com/wixe/chargecap/releases/tag/v0.3.0",
+            dmgUrl: "https://github.com/wixe/chargecap/raw/main/dist/ChargeCap.dmg",
+            binaryUrl: "https://raw.githubusercontent.com/wixe/chargecap/main/bin/chargecap",
+            isNewer: true
+        )
+        let data = try JSONEncoder().encode(info)
+        let decoded = try JSONDecoder().decode(ReleaseInfo.self, from: data)
+        XCTAssertEqual(decoded.version, "0.3.0")
+        XCTAssertEqual(decoded.tagName, "v0.3.0")
+        XCTAssertTrue(decoded.isNewer)
+    }
 }
