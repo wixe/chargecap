@@ -158,6 +158,13 @@ This path is undocumented and may change in a future macOS update. The hardware 
 
 ---
 
+## ⚠️ Disclaimer
+
+> [!CAUTION]
+> **Use at your own risk.** ChargePlan interfaces directly with low-level macOS power management, AppleSMC registers, and battery charging subsystems. While designed with safety boundaries and thermal fail-safes, **the developer is not responsible for any hardware damage, battery degradation, data loss, voided warranties, or system issues** resulting from the use of this software. This software is provided "as is", without warranty of any kind.
+
+---
+
 ## 📄 License
 
 ChargePlan is open-source software licensed under the [MIT License](LICENSE).
