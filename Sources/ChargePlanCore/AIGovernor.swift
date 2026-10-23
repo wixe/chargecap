@@ -106,7 +106,31 @@ public class AIGovernor {
             
             let floorSuffix = target < 80 ? " (Apple 80% Hardware Floor)" : ""
             if status.percent >= effectiveTarget {
+            let floorSuffix = target < 80 ? " (Apple 80% Hardware Floor)" : ""
+            if status.percent >= effectiveTarget {
                 state.inDrift = true
+                
+                // Over-limit charge guard: if battery is at/above limit but actively drawing charge,
+                // trigger a rate-limited software kick to latch powerd into AC pass-through.
+                let isDrawingCharge = status.isCharging || status.amperageMA > 50
+                if isDrawingCharge {
+                    let cooldown = max(15.0, config.kickCooldownSeconds)
+                    let timeSinceLastKick = state.lastKickTimestamp.map { Date().timeIntervalSince($0) } ?? Double.infinity
+                    
+                    if timeSinceLastKick >= cooldown {
+                        hardware.kickPowerUIRefresh()
+                        state.lastKickTimestamp = Date()
+                        state.kickCount += 1
+                        state.lastActionTimestamp = Date()
+                        state.lastActionReason = "Over-limit charge detected (\(status.percent)% >= \(effectiveTarget)%, \(status.amperageMA)mA). Triggered latch kick #\(state.kickCount)."
+                        state.modeDescription = "Kicking powerd to halt charge (Kick #\(state.kickCount))"
+                        return
+                    } else {
+                        let remaining = Int(ceil(cooldown - timeSinceLastKick))
+                        state.modeDescription = "Holding Cap at \(effectiveTarget)%\(floorSuffix) (settling powerd, cooldown \(remaining)s)"
+                        return
+                    }
+                }
                 state.modeDescription = status.amperageMA == 0
                     ? "Holding Cap at \(effectiveTarget)%\(floorSuffix) (Idle AC Pass-Through)"
                     : "Holding Cap at \(effectiveTarget)%\(floorSuffix) (AC Pass-Through)"
@@ -192,6 +216,9 @@ public class AIGovernor {
                 "drift_margin": config.driftMargin,
                 "deadband_enabled": config.driftEnabled,
                 "deadband_delta": config.driftMargin,
+                "kick_cooldown_seconds": config.kickCooldownSeconds,
+                "kick_count": state.kickCount,
+                "last_kick_time": state.lastKickTimestamp.map { ISO8601DateFormatter().string(from: $0) } ?? "",
                 "charging_inhibited": state.isChargingInhibited,
                 "thermal_throttled": state.isThermalThrottled,
                 "mode": state.modeDescription,

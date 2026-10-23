@@ -294,6 +294,10 @@ public class HardwareBackend {
         return unsafeBitCast(method_getImplementation(method), to: SetFn.self)(client, setSel, target, &err)
     }
     
+    public func kickPowerUIRefresh() {
+        triggerPowerUIRefresh()
+    }
+    
     private func triggerPowerUIRefresh() {
         // 1. Post Darwin notification that PowerUIAgent listens for
         let notifyProc = Process()

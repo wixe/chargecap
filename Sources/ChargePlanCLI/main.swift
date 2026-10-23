@@ -16,6 +16,8 @@ func printHelp() {
       status [--json]           Display battery health, power telemetry, and governor status
       set <limit>               Set target charge limit (e.g. 50, 80)
       drift <on|off> [margin]   Configure drift margin (e.g. drift on 3)
+      kick                      Trigger immediate software refresh kick to lock into AC pass-through
+      cooldown <seconds>        Configure minimum cooldown between over-limit kicks (default: 60s)
       daemon                    Run the power governor in the foreground
       install                   Install background system service (keeps limit active when sleeping or logged out)
       uninstall                 Remove background system service
@@ -166,6 +168,38 @@ func handleDrift(args: [String]) {
         let hw = HardwareBackend()
         _ = hw.setChargeLimitPercentage(cfg.targetLimit, delta: enabled ? margin : 1)
         print("✅ Drift margin updated: \(enabled ? "ENABLED (-\(margin)%)" : "DISABLED")")
+    } else {
+        print("⚠️ Warning: Could not write configuration. Try running with 'sudo'.")
+    }
+}
+
+func handleKick() {
+    if let resp = UnixSocketClient.send("KICK") {
+        if resp.contains("\"success\":true") {
+            print("⚡ Software refresh kick dispatched to powerd and PowerUIAgent.")
+            return
+        }
+    }
+    let hw = HardwareBackend()
+    hw.kickPowerUIRefresh()
+    print("⚡ Software refresh kick triggered directly.")
+}
+
+func handleCooldown(args: [String]) {
+    guard let first = args.first, let secs = Double(first), (10...600).contains(secs) else {
+        print("❌ Error: Please specify a cooldown in seconds between 10 and 600 (e.g. 'chargeplan cooldown 60')")
+        exit(1)
+    }
+    if let resp = UnixSocketClient.send("KICK_COOLDOWN \(secs)") {
+        if resp.contains("\"success\":true") {
+            print("✅ Kick rate limit updated: maximum 1 kick every \(Int(secs))s.")
+            return
+        }
+    }
+    var cfg = ConfigManager.shared.load()
+    cfg.kickCooldownSeconds = secs
+    if ConfigManager.shared.save(cfg) {
+        print("✅ Kick rate limit saved: maximum 1 kick every \(Int(secs))s.")
     } else {
         print("⚠️ Warning: Could not write configuration. Try running with 'sudo'.")
     }
@@ -487,6 +521,10 @@ case "set":
     handleSet(args: Array(args.dropFirst()))
 case "drift", "deadband":
     handleDrift(args: Array(args.dropFirst()))
+case "kick":
+    handleKick()
+case "cooldown":
+    handleCooldown(args: Array(args.dropFirst()))
 case "daemon":
     handleDaemon()
 case "install":

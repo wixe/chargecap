@@ -117,6 +117,7 @@ public struct GovernorConfig: Codable, Equatable {
     public var thermalProtectionEnabled: Bool
     public var autoServerMode: Bool
     public var pollIntervalSeconds: Double
+    public var kickCooldownSeconds: Double
     
     // Backwards-compatible aliases for deadband
     public var deadbandEnabled: Bool {
@@ -139,6 +140,7 @@ public struct GovernorConfig: Codable, Equatable {
         case thermalProtectionEnabled
         case autoServerMode
         case pollIntervalSeconds
+        case kickCooldownSeconds
     }
     
     public init(
@@ -164,7 +166,8 @@ public struct GovernorConfig: Codable, Equatable {
         deadbandDelta: Int,
         thermalProtectionEnabled: Bool,
         autoServerMode: Bool,
-        pollIntervalSeconds: Double
+        pollIntervalSeconds: Double,
+        kickCooldownSeconds: Double = 60.0
     ) {
         self.targetLimit = targetLimit
         self.driftEnabled = deadbandEnabled
@@ -172,6 +175,7 @@ public struct GovernorConfig: Codable, Equatable {
         self.thermalProtectionEnabled = thermalProtectionEnabled
         self.autoServerMode = autoServerMode
         self.pollIntervalSeconds = pollIntervalSeconds
+        self.kickCooldownSeconds = kickCooldownSeconds
     }
     
     public init(from decoder: Decoder) throws {
@@ -188,6 +192,7 @@ public struct GovernorConfig: Codable, Equatable {
         self.thermalProtectionEnabled = try c.decodeIfPresent(Bool.self, forKey: .thermalProtectionEnabled) ?? true
         self.autoServerMode = try c.decodeIfPresent(Bool.self, forKey: .autoServerMode) ?? true
         self.pollIntervalSeconds = try c.decodeIfPresent(Double.self, forKey: .pollIntervalSeconds) ?? 5.0
+        self.kickCooldownSeconds = try c.decodeIfPresent(Double.self, forKey: .kickCooldownSeconds) ?? 60.0
     }
     
     public func encode(to encoder: Encoder) throws {
@@ -200,6 +205,7 @@ public struct GovernorConfig: Codable, Equatable {
         try c.encode(thermalProtectionEnabled, forKey: .thermalProtectionEnabled)
         try c.encode(autoServerMode, forKey: .autoServerMode)
         try c.encode(pollIntervalSeconds, forKey: .pollIntervalSeconds)
+        try c.encode(kickCooldownSeconds, forKey: .kickCooldownSeconds)
     }
     
     public static var `default`: GovernorConfig {
@@ -209,7 +215,8 @@ public struct GovernorConfig: Codable, Equatable {
             driftMargin: 3,
             thermalProtectionEnabled: true,
             autoServerMode: true,
-            pollIntervalSeconds: 5.0
+            pollIntervalSeconds: 5.0,
+            kickCooldownSeconds: 60.0
         )
     }
 }
@@ -223,6 +230,8 @@ public struct GovernorState: Codable {
     public var lastActionTimestamp: Date
     public var lastActionReason: String
     public var consecutiveErrors: Int
+    public var lastKickTimestamp: Date?
+    public var kickCount: Int
     
     // Backwards-compatible alias for inDeadband
     public var inDeadband: Bool {
@@ -239,7 +248,9 @@ public struct GovernorState: Codable {
             modeDescription: "Initializing",
             lastActionTimestamp: Date(),
             lastActionReason: "Daemon started",
-            consecutiveErrors: 0
+            consecutiveErrors: 0,
+            lastKickTimestamp: nil,
+            kickCount: 0
         )
     }
 }
