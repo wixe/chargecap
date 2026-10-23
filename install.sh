@@ -2,17 +2,22 @@
 set -euo pipefail
 
 # ==============================================================================
-# ChargePlan Zero-Dependency Installer (Precompiled Universal Binary + Source)
+# ChargePlan Zero-Dependency Installer (Apple Silicon Native)
 # https://github.com/wixe/chargeplan
 # ==============================================================================
 
 echo "========================================================================"
-echo "⚡ Installing ChargePlan — Intelligent macOS Battery Governor"
+echo "⚡ Installing ChargePlan — Intelligent Apple Silicon Battery Governor"
 echo "========================================================================"
 
 if [[ $EUID -ne 0 ]]; then
    echo "❌ Error: This installer must be run as root."
    echo "   Please run: sudo ./install.sh"
+   exit 1
+fi
+
+if [[ "$(uname -m)" != "arm64" ]]; then
+   echo "❌ Error: ChargePlan is designed exclusively for Apple Silicon (M-Series) Macs."
    exit 1
 fi
 
@@ -33,10 +38,10 @@ if [[ "${1:-}" == "--build" ]]; then
         BIN_PATH="$SCRIPT_DIR/.build/release/chargeplan"
     fi
 elif [[ -f "$PREBUILT_PATH" ]]; then
-    echo "📦 Using precompiled Universal binary (bin/chargeplan)..."
+    echo "📦 Using precompiled Apple Silicon binary (bin/chargeplan)..."
     BIN_PATH="$PREBUILT_PATH"
 else
-    echo "⬇️  Downloading precompiled ChargePlan Universal binary from GitHub..."
+    echo "⬇️  Downloading precompiled ChargePlan binary from GitHub..."
     TMP_BIN="$(mktemp /tmp/chargeplan.XXXXXX)"
     curl -fsSL "https://raw.githubusercontent.com/wixe/chargeplan/main/bin/chargeplan" -o "$TMP_BIN"
     BIN_PATH="$TMP_BIN"

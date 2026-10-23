@@ -6,7 +6,7 @@ let VERSION = ChargePlanVersion
 func printHelp() {
     print("""
     ⚡ ChargePlan — Intelligent, Lightweight Battery & Power Management for macOS
-    Version \(VERSION) (Apple Silicon & Intel)
+    Version \(VERSION) (Apple Silicon M-Series)
     Website: https://github.com/wixe/chargeplan
     
     USAGE:

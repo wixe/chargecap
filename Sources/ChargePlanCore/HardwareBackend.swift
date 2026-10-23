@@ -160,12 +160,6 @@ public class HardwareBackend {
                 return s1
             }
             
-            // 4. Intel SMC charge limit key (BCLM)
-            if smc.getKeyInfo("BCLM") != nil {
-                let bclmVal: UInt8 = inhibit ? UInt8(max(30, min(100, currentLimit))) : 100
-                return smc.writeByte("BCLM", value: bclmVal)
-            }
-            
             return false
             
         case .nativePowerUI:

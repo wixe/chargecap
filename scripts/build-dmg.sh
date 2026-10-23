@@ -10,27 +10,21 @@ STAGING_DIR="/tmp/chargeplan-dmg-staging"
 APP_BUNDLE="$STAGING_DIR/ChargePlan.app"
 DMG_PATH="$DIST_DIR/ChargePlan.dmg"
 
-echo "🔨 Building Universal CLI & Menu Bar App (arm64 + x86_64)..."
+echo "🔨 Building Apple Silicon (arm64) CLI & Menu Bar App..."
 swift build -c release --build-system native --scratch-path "$BUILD_SCRATCH" --arch arm64
-swift build -c release --build-system native --scratch-path "$BUILD_SCRATCH" --arch x86_64
 
 mkdir -p "$SCRIPT_DIR/bin" "$DIST_DIR"
 rm -rf "$STAGING_DIR"
 mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"
 
-echo "🧬 Creating Universal binaries with lipo..."
-lipo -create \
-    "$BUILD_SCRATCH/arm64-apple-macosx/release/chargeplan" \
-    "$BUILD_SCRATCH/x86_64-apple-macosx/release/chargeplan" \
-    -output "$SCRIPT_DIR/bin/chargeplan"
+echo "📦 Packaging native arm64 binaries..."
+cp "$BUILD_SCRATCH/arm64-apple-macosx/release/chargeplan" "$SCRIPT_DIR/bin/chargeplan"
 strip -x "$SCRIPT_DIR/bin/chargeplan"
 codesign --force --sign - "$SCRIPT_DIR/bin/chargeplan"
 
-lipo -create \
-    "$BUILD_SCRATCH/arm64-apple-macosx/release/ChargePlanApp" \
-    "$BUILD_SCRATCH/x86_64-apple-macosx/release/ChargePlanApp" \
-    -output "$APP_BUNDLE/Contents/MacOS/ChargePlanApp"
+cp "$BUILD_SCRATCH/arm64-apple-macosx/release/ChargePlanApp" "$APP_BUNDLE/Contents/MacOS/ChargePlanApp"
 strip -x "$APP_BUNDLE/Contents/MacOS/ChargePlanApp"
+codesign --force --sign - "$APP_BUNDLE/Contents/MacOS/ChargePlanApp"
 
 cp "$SCRIPT_DIR/bin/chargeplan" "$APP_BUNDLE/Contents/Resources/chargeplan"
 chmod 755 "$APP_BUNDLE/Contents/MacOS/ChargePlanApp" "$APP_BUNDLE/Contents/Resources/chargeplan"

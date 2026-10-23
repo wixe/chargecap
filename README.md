@@ -1,9 +1,9 @@
 # ChargePlan ⚡🔋
 
-> **Native, lightweight macOS battery & power governor.** Stop battery degradation, prevent hardware charge creep, and maintain custom charge ceilings with closed-loop telemetry.
+> **Native, featherweight battery governor for Apple Silicon.** Stop battery degradation, prevent hardware charge creep, and maintain custom charge ceilings with closed-loop telemetry.
 
 [![Build](https://github.com/wixe/chargeplan/actions/workflows/build.yml/badge.svg)](https://github.com/wixe/chargeplan/actions)
-[![Platform](https://img.shields.io/badge/platform-macOS%2013%2B-blue.svg)](https://apple.com/macos)
+[![Platform](https://img.shields.io/badge/platform-macOS%2013%2B%20%7C%20Apple%20Silicon-blue.svg)](https://apple.com/macos)
 [![Swift](https://img.shields.io/badge/Swift-5.9%20%7C%206.0-orange.svg)](https://swift.org)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Author](https://img.shields.io/badge/developer-wixe-purple.svg)](https://github.com/wixe)
@@ -12,7 +12,7 @@
 
 ## ⚡ What is ChargePlan?
 
-**ChargePlan** is a native, featherweight power governor, menu bar app, and CLI utility designed for Apple Silicon (M1/M2/M3/M4) and Intel MacBooks:
+**ChargePlan** is a native, featherweight power governor, menu bar app, and CLI utility designed specifically for Apple Silicon MacBooks (M-Series: M1 through M6+):
 
 * **Closed-Loop Hardware Verification:** Instead of writing a charge target once and hoping the hardware remembers it after sleep, lid closing, or USB-C PD negotiation, ChargePlan monitors system power events and continuously re-asserts your configured limit.
 * **True AC Pass-Through:** Inhibits cell charging while powering system load directly from the wall adapter (`0 mA` battery current, `0.00W` battery stress) without cutting AC input.
@@ -35,7 +35,7 @@
 | **Security & Access** | Non-privileged read telemetry; administrative group or console ownership for setting limits |
 | **IPC Transport** | Local POSIX domain socket (`/var/run/chargeplan.sock`) with standard timeouts |
 | **Operating Modes** | Native AppKit Menu Bar app (`ChargePlan.app`) and background system service |
-| **Footprint & License** | **< 300 KB** Universal binary, **< 10 MB RAM**, **0% CPU**, **100% Open Source (MIT)** |
+| **Footprint & License** | **< 300 KB** Native arm64 binary, **< 10 MB RAM**, **0% CPU**, **100% Open Source (MIT)** |
 
 ---
 
