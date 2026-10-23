@@ -114,7 +114,7 @@ Running `chargecap status` displays high-precision hardware diagnostics:
   Battery Level:      55% (🔌 AC Connected (Not Charging))
   Target Limit:       50% (Hysteresis Deadband ±3%)
   Governor State:     Holding Cap at 50% (Idle AC Pass-through)
-  Health Condition:   [█████████████████░░░] 86.2%
+  Health Condition:   [██████████████████░░] 86.2%
   Cycle Count:        121 cycles
   Voltage & Current:  11389 mV  •  0 mA (0.00W)
   Hardware Capacity:  3777 / 4382 mAh
@@ -140,6 +140,21 @@ Configuration is automatically stored at `/etc/chargecap.json` (or `~/.config/ch
   "thermalProtectionEnabled": true
 }
 ```
+
+---
+
+## macOS 27 (Golden Gate) Notes
+
+On macOS 27 (and the firmware that ships with certain 26.x / 15.x security updates), Apple gated the classic SMC charge-inhibit keys (`CHTE`, `CH0B`, `CH0C`, and the newer `bfD0`/`bfE0`/`bfF0` set) behind the private entitlement `com.apple.private.iokit.soc-limit`. Even root cannot write them.
+
+ChargeCap automatically falls back to Apple’s own manual charge-limit mechanism inside `powerd`:
+
+- For limits ≥ 80% it uses the public PowerUI XPC path (the same one behind System Settings → Battery → Charge Limit).
+- For limits below 80% (e.g. 50%) it writes `mclLimitValue` into the `com.apple.smartcharging.topoffprotection` preference domain and posts `com.apple.smartcharging.defaultschanged`. The 80–100% range check exists only in the XPC handler; the preference-reload path forwards the value unvalidated. This engages a firmware SoC ceiling with true AC pass-through (~0 mA battery current) that holds through sleep.
+
+Once the battery reaches the target, the Mac runs entirely from the adapter. The closed-loop governor continues to re-assert the limit after sleep, lid events, or power renegotiation. Occasional Apple calibration charges to 100% can still occur; ChargeCap will restore the limit afterward.
+
+This path is undocumented and may change in a future macOS update. The hardware backend reported by `chargecap status` will show **macOS Native PowerUI (AC Pass-Through)** when this mode is active.
 
 ---
 
