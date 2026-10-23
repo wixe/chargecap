@@ -86,7 +86,6 @@ public class AIGovernor {
         }
         
         let target = config.targetLimit
-        let target = config.targetLimit
         let isNative = hardware.modeName.contains("Native PowerUI")
         let effectiveTarget = isNative ? max(80, target) : target
         let lowerBound = max(20, effectiveTarget - (config.driftEnabled ? config.driftMargin : 1))
@@ -104,8 +103,6 @@ public class AIGovernor {
                 if !success { state.consecutiveErrors += 1 }
             }
             
-            let floorSuffix = target < 80 ? " (Apple 80% Hardware Floor)" : ""
-            if status.percent >= effectiveTarget {
             let floorSuffix = target < 80 ? " (Apple 80% Hardware Floor)" : ""
             if status.percent >= effectiveTarget {
                 state.inDrift = true

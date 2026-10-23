@@ -149,7 +149,8 @@ public struct GovernorConfig: Codable, Equatable {
         driftMargin: Int,
         thermalProtectionEnabled: Bool,
         autoServerMode: Bool,
-        pollIntervalSeconds: Double
+        pollIntervalSeconds: Double,
+        kickCooldownSeconds: Double = 60.0
     ) {
         self.targetLimit = targetLimit
         self.driftEnabled = driftEnabled
@@ -157,6 +158,7 @@ public struct GovernorConfig: Codable, Equatable {
         self.thermalProtectionEnabled = thermalProtectionEnabled
         self.autoServerMode = autoServerMode
         self.pollIntervalSeconds = pollIntervalSeconds
+        self.kickCooldownSeconds = kickCooldownSeconds
     }
     
     // Legacy initializer supporting deadband naming
