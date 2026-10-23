@@ -90,7 +90,7 @@ func handleStatus(jsonOutput: Bool) {
     
     if let cachedData = UserDefaults.standard.data(forKey: "com.wixe.chargecap.cachedReleaseInfo"),
        let cached = try? JSONDecoder().decode(ReleaseInfo.self, from: cachedData),
-       cached.isNewer {
+       UpdateChecker.isVersion(cached.version, newerThan: ChargeCapVersion) {
         print("💡 Update available: \(cached.tagName) — Run 'sudo chargecap update' to upgrade.\n")
     }
 }

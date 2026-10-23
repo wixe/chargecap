@@ -104,7 +104,7 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
         titleItem.isEnabled = false
         menu.addItem(titleItem)
         
-        if let rel = latestRelease, rel.isNewer {
+        if let rel = latestRelease, UpdateChecker.isVersion(rel.version, newerThan: ChargeCapVersion) {
             let updateItem = NSMenuItem(title: "⬆️ Update Available (\(rel.tagName))…", action: #selector(triggerAppUpdate), keyEquivalent: "")
             updateItem.target = self
             menu.addItem(updateItem)
@@ -396,7 +396,7 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
             updateSubLabel?.stringValue = updateStatusText
             updateActionButton?.title = "Updating…"
             updateActionButton?.isEnabled = false
-        } else if let rel = latestRelease, rel.isNewer {
+        } else if let rel = latestRelease, UpdateChecker.isVersion(rel.version, newerThan: ChargeCapVersion) {
             updateLabel?.stringValue = "🎉 Update Available: \(rel.tagName)"
             updateLabel?.textColor = .systemOrange
             updateSubLabel?.stringValue = updateStatusText.isEmpty ? "New version ready to install." : updateStatusText
@@ -557,7 +557,7 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
     }
     
     @objc private func updateActionButtonClicked() {
-        if let release = latestRelease, release.isNewer {
+        if let release = latestRelease, UpdateChecker.isVersion(release.version, newerThan: ChargeCapVersion) {
             triggerAppUpdate()
         } else {
             manualCheckUpdate()
@@ -566,7 +566,7 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
     
     @objc private func triggerAppUpdate() {
         showSettingsWindow()
-        guard let release = latestRelease, release.isNewer else { return }
+        guard let release = latestRelease, UpdateChecker.isVersion(release.version, newerThan: ChargeCapVersion) else { return }
         guard let dmgUrl = URL(string: release.dmgUrl) else { return }
         
         isUpdatingApp = true
@@ -613,8 +613,8 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
                 formatter.timeStyle = .short
                 let timeStr = formatter.string(from: Date())
                 
-                if info?.isNewer == true {
-                    self.updateStatusText = "New release found: \(info!.tagName)"
+                if let inf = info, UpdateChecker.isVersion(inf.version, newerThan: ChargeCapVersion) {
+                    self.updateStatusText = "New release found: \(inf.tagName)"
                     self.rebuildMenu()
                     self.refreshSettingsWindow()
                     self.showSettingsWindow()

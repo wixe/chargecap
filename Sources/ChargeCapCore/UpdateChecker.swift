@@ -85,6 +85,12 @@ public final class UpdateChecker {
         return compareVersion(v1, v2) == .orderedDescending
     }
     
+    public static func clearCache() {
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: lastCheckKey)
+        defaults.removeObject(forKey: cachedReleaseKey)
+    }
+    
     /// Queries GitHub for the latest release or tags. Throttled to once every 24 hours unless `force: true`.
     public static func checkForUpdate(currentVersion: String = ChargeCapVersion, force: Bool = false) async -> ReleaseInfo? {
         let defaults = UserDefaults.standard
@@ -93,6 +99,21 @@ public final class UpdateChecker {
             if Date().timeIntervalSince(lastCheck) < checkIntervalSeconds {
                 if let cachedData = defaults.data(forKey: cachedReleaseKey),
                    let cached = try? JSONDecoder().decode(ReleaseInfo.self, from: cachedData) {
+                    let currentlyNewer = isVersion(cached.version, newerThan: currentVersion)
+                    if cached.isNewer != currentlyNewer {
+                        let updated = ReleaseInfo(
+                            version: cached.version,
+                            tagName: cached.tagName,
+                            title: cached.title,
+                            releaseNotes: cached.releaseNotes,
+                            htmlUrl: cached.htmlUrl,
+                            dmgUrl: cached.dmgUrl,
+                            binaryUrl: cached.binaryUrl,
+                            isNewer: currentlyNewer
+                        )
+                        persistCache(updated)
+                        return updated
+                    }
                     return cached
                 }
                 return nil
@@ -280,6 +301,9 @@ public final class UpdateChecker {
         // Detach volume
         _ = runProcess("/usr/bin/hdiutil", ["detach", mountDir.path, "-quiet"])
         
+        // Clear cached update so newly launched app checks current status cleanly
+        clearCache()
+        
         if relaunch {
             progressHandler("Relaunching ChargeCap…")
             let relaunchProc = Process()
@@ -332,6 +356,9 @@ public final class UpdateChecker {
         progressHandler("Restarting LaunchDaemon…")
         _ = runProcess("/bin/launchctl", ["kickstart", "-k", "system/com.wixe.chargecap.daemon"])
         _ = runProcess("/bin/launchctl", ["kickstart", "-k", "system/com.wixe.chargecap"])
+        
+        // Clear cached update
+        clearCache()
     }
     
     private static func runProcess(_ path: String, _ args: [String]) -> (exitCode: Int32, output: String) {
