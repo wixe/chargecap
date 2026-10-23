@@ -9,7 +9,7 @@ public final class UnixSocketServer {
     private var serverFD: Int32 = -1
     private var isRunning = false
     private weak var governor: AIGovernor?
-    private let acceptQueue = DispatchQueue(label: "com.wixe.chargeplan.ipc", qos: .utility)
+    private let acceptQueue = DispatchQueue(label: "io.github.wixe.chargeplan.ipc", qos: .utility)
     
     public init(socketPath: String = UnixSocketServer.defaultSocketPath, governor: AIGovernor) {
         self.socketPath = socketPath

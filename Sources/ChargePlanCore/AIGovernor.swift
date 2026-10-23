@@ -7,7 +7,7 @@ public class AIGovernor {
     public private(set) var state: GovernorState
     
     private var isRunning = false
-    private let queue = DispatchQueue(label: "com.wixe.chargeplan.governor", qos: .utility)
+    private let queue = DispatchQueue(label: "io.github.wixe.chargeplan.governor", qos: .utility)
     private let stateLock = NSLock()
     
     public init(config: GovernorConfig = ConfigManager.shared.load()) {

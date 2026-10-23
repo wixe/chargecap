@@ -47,7 +47,7 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << EOF
     <key>CFBundleExecutable</key>
     <string>ChargePlanApp</string>
     <key>CFBundleIdentifier</key>
-    <string>com.wixe.chargeplan.app</string>
+    <string>io.github.wixe.chargeplan.app</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>

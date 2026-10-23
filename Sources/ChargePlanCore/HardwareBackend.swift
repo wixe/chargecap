@@ -14,7 +14,7 @@ public class HardwareBackend {
     private var activeMode: ChargingMode = .simulation
     private var currentLimit: Int = 50
     private var currentDelta: Int = 3
-    private let logger = Logger(subsystem: "com.wixe.chargeplan", category: "HardwareBackend")
+    private let logger = Logger(subsystem: "io.github.wixe.chargeplan", category: "HardwareBackend")
     
     // Cached PowerUISmartChargeClient instance
     private var powerUIClient: AnyObject?

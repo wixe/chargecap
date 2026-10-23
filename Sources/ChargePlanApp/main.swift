@@ -198,7 +198,12 @@ final class ChargePlanAppDelegate: NSObject, NSApplicationDelegate {
     private lazy var fallbackHardware = HardwareBackend()
     private let launchAgentPath: String = {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return "\(home)/Library/LaunchAgents/com.wixe.chargeplan.app.plist"
+        // Clean up legacy LaunchAgent plist if present
+        let legacyPath = "\(home)/Library/LaunchAgents/com.wixe.chargeplan.app.plist"
+        if FileManager.default.fileExists(atPath: legacyPath) {
+            _ = try? FileManager.default.removeItem(atPath: legacyPath)
+        }
+        return "\(home)/Library/LaunchAgents/io.github.wixe.chargeplan.app.plist"
     }()
     
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -812,7 +817,7 @@ final class ChargePlanAppDelegate: NSObject, NSApplicationDelegate {
             <plist version="1.0">
             <dict>
                 <key>Label</key>
-                <string>com.wixe.chargeplan.app</string>
+                <string>io.github.wixe.chargeplan.app</string>
                 <key>ProgramArguments</key>
                 <array>
                     <string>\(execPath)</string>

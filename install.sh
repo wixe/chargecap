@@ -56,10 +56,11 @@ if [[ "$BIN_PATH" == /tmp/chargeplan.* ]]; then
 fi
 
 echo "⚙️  Configuring LaunchDaemon..."
-# Clean up legacy ChargeCap plists and running services
+# Clean up legacy ChargePlan/ChargeCap plists and running services
+launchctl bootout system/com.wixe.chargeplan.daemon 2>/dev/null || true
 launchctl bootout system/com.wixe.chargecap.daemon 2>/dev/null || true
 launchctl bootout system/com.wixe.chargecap 2>/dev/null || true
-rm -f /Library/LaunchDaemons/com.wixe.chargecap.plist /Library/LaunchDaemons/com.wixe.chargecap.daemon.plist 2>/dev/null || true
+rm -f /Library/LaunchDaemons/com.wixe.chargeplan.daemon.plist /Library/LaunchDaemons/com.wixe.chargecap.plist /Library/LaunchDaemons/com.wixe.chargecap.daemon.plist 2>/dev/null || true
 
 "$INSTALL_DIR/chargeplan" install
 

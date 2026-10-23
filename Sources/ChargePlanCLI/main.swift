@@ -89,7 +89,7 @@ func handleStatus(jsonOutput: Bool) {
     ========================================================================
     """)
     
-    if let cachedData = UserDefaults.standard.data(forKey: "com.wixe.chargeplan.cachedReleaseInfo"),
+    if let cachedData = UserDefaults.standard.data(forKey: "io.github.wixe.chargeplan.cachedReleaseInfo") ?? UserDefaults.standard.data(forKey: "com.wixe.chargeplan.cachedReleaseInfo"),
        let cached = try? JSONDecoder().decode(ReleaseInfo.self, from: cachedData),
        UpdateChecker.isVersion(cached.version, newerThan: ChargePlanVersion) {
         print("💡 Update available: \(cached.tagName) — Run 'sudo chargeplan update' to upgrade.\n")
@@ -173,6 +173,25 @@ func handleDrift(args: [String]) {
 
 func handleDaemon() {
     print("🚀 Starting ChargePlan Governor Daemon...")
+    
+    // Auto-migrate legacy LaunchDaemon plist if running as root
+    if getuid() == 0 && FileManager.default.fileExists(atPath: "/Library/LaunchDaemons/com.wixe.chargeplan.daemon.plist") {
+        let legacyPlist = "/Library/LaunchDaemons/com.wixe.chargeplan.daemon.plist"
+        let newPlist = "/Library/LaunchDaemons/io.github.wixe.chargeplan.daemon.plist"
+        if !FileManager.default.fileExists(atPath: newPlist) {
+            if let content = try? String(contentsOfFile: legacyPlist, encoding: .utf8) {
+                let updated = content.replacingOccurrences(of: "com.wixe.chargeplan.daemon", with: "io.github.wixe.chargeplan.daemon")
+                try? updated.write(toFile: newPlist, atomically: true, encoding: .utf8)
+                let chmod = Process()
+                chmod.executableURL = URL(fileURLWithPath: "/bin/chmod")
+                chmod.arguments = ["644", newPlist]
+                try? chmod.run()
+                chmod.waitUntilExit()
+            }
+        }
+        try? FileManager.default.removeItem(atPath: legacyPlist)
+    }
+    
     let cfg = ConfigManager.shared.load()
     let governor = AIGovernor(config: cfg)
     governor.start()
@@ -270,7 +289,7 @@ func handleInstall() {
     <plist version="1.0">
     <dict>
         <key>Label</key>
-        <string>com.wixe.chargeplan.daemon</string>
+        <string>io.github.wixe.chargeplan.daemon</string>
         <key>ProgramArguments</key>
         <array>
             <string>\(daemonBin)</string>
@@ -288,10 +307,10 @@ func handleInstall() {
     </plist>
     """
     
-    let plistPath = "/Library/LaunchDaemons/com.wixe.chargeplan.daemon.plist"
+    let plistPath = "/Library/LaunchDaemons/io.github.wixe.chargeplan.daemon.plist"
     
     // Bootout existing legacy or current label
-    for label in ["com.wixe.chargeplan.daemon", "com.wixe.chargecap.daemon", "com.wixe.chargecap"] {
+    for label in ["io.github.wixe.chargeplan.daemon", "com.wixe.chargeplan.daemon", "com.wixe.chargecap.daemon", "com.wixe.chargecap"] {
         let bootout = Process()
         bootout.executableURL = URL(fileURLWithPath: "/bin/launchctl")
         bootout.arguments = ["bootout", "system/\(label)"]
@@ -300,6 +319,7 @@ func handleInstall() {
     }
     
     // Remove legacy plists so macOS BTM cleans up old entries
+    try? FileManager.default.removeItem(atPath: "/Library/LaunchDaemons/com.wixe.chargeplan.daemon.plist")
     try? FileManager.default.removeItem(atPath: "/Library/LaunchDaemons/com.wixe.chargecap.plist")
     try? FileManager.default.removeItem(atPath: "/Library/LaunchDaemons/com.wixe.chargecap.daemon.plist")
     
@@ -323,7 +343,7 @@ func handleInstall() {
         // Ensure running daemon is restarted
         let kickstart = Process()
         kickstart.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        kickstart.arguments = ["kickstart", "-k", "system/com.wixe.chargeplan.daemon"]
+        kickstart.arguments = ["kickstart", "-k", "system/io.github.wixe.chargeplan.daemon"]
         try? kickstart.run()
         kickstart.waitUntilExit()
         
@@ -349,7 +369,7 @@ func handleUninstall() {
     _ = hw.setChargingInhibited(false)
     _ = hw.setChargeLimitPercentage(100)
     
-    for label in ["com.wixe.chargeplan.daemon", "com.wixe.chargecap.daemon", "com.wixe.chargecap"] {
+    for label in ["io.github.wixe.chargeplan.daemon", "com.wixe.chargeplan.daemon", "com.wixe.chargecap.daemon", "com.wixe.chargecap"] {
         let bootout = Process()
         bootout.executableURL = URL(fileURLWithPath: "/bin/launchctl")
         bootout.arguments = ["bootout", "system/\(label)"]
@@ -357,6 +377,7 @@ func handleUninstall() {
         bootout.waitUntilExit()
     }
     
+    try? FileManager.default.removeItem(atPath: "/Library/LaunchDaemons/io.github.wixe.chargeplan.daemon.plist")
     try? FileManager.default.removeItem(atPath: "/Library/LaunchDaemons/com.wixe.chargeplan.daemon.plist")
     try? FileManager.default.removeItem(atPath: "/Library/LaunchDaemons/com.wixe.chargecap.daemon.plist")
     try? FileManager.default.removeItem(atPath: "/Library/LaunchDaemons/com.wixe.chargecap.plist")

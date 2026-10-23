@@ -63,8 +63,8 @@ public final class UpdateChecker {
     private static let repoOwner = "wixe"
     private static let repoName = "chargeplan"
     
-    private static let lastCheckKey = "com.wixe.chargeplan.lastUpdateCheck"
-    private static let cachedReleaseKey = "com.wixe.chargeplan.cachedReleaseInfo"
+    private static let lastCheckKey = "io.github.wixe.chargeplan.lastUpdateCheck"
+    private static let cachedReleaseKey = "io.github.wixe.chargeplan.cachedReleaseInfo"
     private static let checkIntervalSeconds: TimeInterval = 86400 // 24 hours
     
     /// Compares two semver version strings (e.g. "0.2.0" vs "v0.3.0").
@@ -93,6 +93,8 @@ public final class UpdateChecker {
         let defaults = UserDefaults.standard
         defaults.removeObject(forKey: lastCheckKey)
         defaults.removeObject(forKey: cachedReleaseKey)
+        defaults.removeObject(forKey: "com.wixe.chargeplan.lastUpdateCheck")
+        defaults.removeObject(forKey: "com.wixe.chargeplan.cachedReleaseInfo")
         defaults.removeObject(forKey: "com.wixe.chargecap.lastUpdateCheck")
         defaults.removeObject(forKey: "com.wixe.chargecap.cachedReleaseInfo")
     }
@@ -385,7 +387,11 @@ public final class UpdateChecker {
                     _ = runProcess("/usr/bin/xattr", ["-cr", cliBin])
                     _ = runProcess("/usr/bin/codesign", ["--force", "--sign", "-", daemonBin])
                     _ = runProcess("/usr/bin/codesign", ["--force", "--sign", "-", cliBin])
-                    _ = runProcess("/bin/launchctl", ["kickstart", "-k", "system/com.wixe.chargeplan.daemon"])
+                    // Clean up legacy daemon and restart new
+                    _ = runProcess("/bin/launchctl", ["bootout", "system/com.wixe.chargeplan.daemon"])
+                    _ = runProcess("/bin/launchctl", ["bootout", "system/com.wixe.chargecap.daemon"])
+                    try? FileManager.default.removeItem(atPath: "/Library/LaunchDaemons/com.wixe.chargeplan.daemon.plist")
+                    _ = runProcess("/bin/launchctl", ["kickstart", "-k", "system/io.github.wixe.chargeplan.daemon"])
                 }
             }
         }
@@ -443,8 +449,16 @@ public final class UpdateChecker {
         _ = runProcess("/usr/bin/codesign", ["--force", "--sign", "-", dest])
         
         progressHandler("Restarting LaunchDaemon…")
-        _ = runProcess("/bin/launchctl", ["kickstart", "-k", "system/com.wixe.chargeplan.daemon"])
-        _ = runProcess("/bin/launchctl", ["kickstart", "-k", "system/com.wixe.chargecap.daemon"])
+        _ = runProcess("/bin/launchctl", ["bootout", "system/com.wixe.chargeplan.daemon"])
+        _ = runProcess("/bin/launchctl", ["bootout", "system/com.wixe.chargecap.daemon"])
+        try? FileManager.default.removeItem(atPath: "/Library/LaunchDaemons/com.wixe.chargeplan.daemon.plist")
+        try? FileManager.default.removeItem(atPath: "/Library/LaunchDaemons/com.wixe.chargecap.daemon.plist")
+        
+        let newPlist = "/Library/LaunchDaemons/io.github.wixe.chargeplan.daemon.plist"
+        if FileManager.default.fileExists(atPath: newPlist) {
+            _ = runProcess("/bin/launchctl", ["bootstrap", "system", newPlist])
+            _ = runProcess("/bin/launchctl", ["kickstart", "-k", "system/io.github.wixe.chargeplan.daemon"])
+        }
         
         // Clear cached update
         clearCache()
