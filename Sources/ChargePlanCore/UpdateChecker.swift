@@ -3,7 +3,8 @@ import Foundation
 import AppKit
 #endif
 
-public let ChargeCapVersion = "0.3.1"
+public let ChargePlanVersion = "0.4.0"
+public let ChargeCapVersion = ChargePlanVersion
 
 public struct ReleaseInfo: Codable, Equatable {
     public let version: String
@@ -50,8 +51,8 @@ public enum UpdateError: LocalizedError {
         case .networkError(let msg): return "Network error: \(msg)"
         case .parsingError(let msg): return "Failed to parse release information: \(msg)"
         case .mountFailed(let msg): return "Failed to mount update disk image: \(msg)"
-        case .missingAppBundle: return "Downloaded disk image does not contain ChargeCap.app"
-        case .copyFailed(let msg): return "Failed to install ChargeCap.app: \(msg)"
+        case .missingAppBundle: return "Downloaded disk image does not contain ChargePlan.app"
+        case .copyFailed(let msg): return "Failed to install ChargePlan.app: \(msg)"
         case .rootRequired: return "Root privileges are required to update the daemon binary (run with sudo)"
         case .commandFailed(let msg): return "System command failed: \(msg)"
         }
@@ -60,10 +61,10 @@ public enum UpdateError: LocalizedError {
 
 public final class UpdateChecker {
     private static let repoOwner = "wixe"
-    private static let repoName = "chargecap"
+    private static let repoName = "chargeplan"
     
-    private static let lastCheckKey = "com.wixe.chargecap.lastUpdateCheck"
-    private static let cachedReleaseKey = "com.wixe.chargecap.cachedReleaseInfo"
+    private static let lastCheckKey = "com.wixe.chargeplan.lastUpdateCheck"
+    private static let cachedReleaseKey = "com.wixe.chargeplan.cachedReleaseInfo"
     private static let checkIntervalSeconds: TimeInterval = 86400 // 24 hours
     
     /// Compares two semver version strings (e.g. "0.2.0" vs "v0.3.0").
@@ -92,10 +93,12 @@ public final class UpdateChecker {
         let defaults = UserDefaults.standard
         defaults.removeObject(forKey: lastCheckKey)
         defaults.removeObject(forKey: cachedReleaseKey)
+        defaults.removeObject(forKey: "com.wixe.chargecap.lastUpdateCheck")
+        defaults.removeObject(forKey: "com.wixe.chargecap.cachedReleaseInfo")
     }
     
     /// Queries GitHub for the latest release or tags. Throttled to once every 24 hours unless `force: true`.
-    public static func checkForUpdate(currentVersion: String = ChargeCapVersion, force: Bool = false) async -> ReleaseInfo? {
+    public static func checkForUpdate(currentVersion: String = ChargePlanVersion, force: Bool = false) async -> ReleaseInfo? {
         let defaults = UserDefaults.standard
         
         if !force, let lastCheck = defaults.object(forKey: lastCheckKey) as? Date {
@@ -154,7 +157,7 @@ public final class UpdateChecker {
         
         var request = URLRequest(url: url)
         request.timeoutInterval = 4.0
-        request.setValue("ChargeCap-Updater", forHTTPHeaderField: "User-Agent")
+        request.setValue("ChargePlan-Updater", forHTTPHeaderField: "User-Agent")
         request.setValue("application/vnd.github.v3+json", forHTTPHeaderField: "Accept")
         
         do {
@@ -170,11 +173,11 @@ public final class UpdateChecker {
             
             let cleanVer = tagName.trimmingCharacters(in: CharacterSet(charactersIn: "vV \t\r\n"))
             let isNewer = isVersion(cleanVer, newerThan: currentVersion)
-            let title = json["name"] as? String ?? "ChargeCap \(tagName)"
+            let title = json["name"] as? String ?? "ChargePlan \(tagName)"
             let body = json["body"] as? String ?? ""
             let htmlUrl = json["html_url"] as? String ?? "https://github.com/\(repoOwner)/\(repoName)/releases"
             
-            var dmgUrl = "https://github.com/\(repoOwner)/\(repoName)/raw/main/dist/ChargeCap.dmg"
+            var dmgUrl = "https://github.com/\(repoOwner)/\(repoName)/raw/main/dist/ChargePlan.dmg"
             if let assets = json["assets"] as? [[String: Any]] {
                 for asset in assets {
                     if let name = asset["name"] as? String, name.hasSuffix(".dmg"),
@@ -184,7 +187,7 @@ public final class UpdateChecker {
                     }
                 }
             }
-            let binaryUrl = "https://raw.githubusercontent.com/\(repoOwner)/\(repoName)/main/bin/chargecap"
+            let binaryUrl = "https://raw.githubusercontent.com/\(repoOwner)/\(repoName)/main/bin/chargeplan"
             
             return ReleaseInfo(
                 version: cleanVer,
@@ -208,7 +211,7 @@ public final class UpdateChecker {
         
         var request = URLRequest(url: url)
         request.timeoutInterval = 4.0
-        request.setValue("ChargeCap-Updater", forHTTPHeaderField: "User-Agent")
+        request.setValue("ChargePlan-Updater", forHTTPHeaderField: "User-Agent")
         request.setValue("application/vnd.github.v3+json", forHTTPHeaderField: "Accept")
         
         do {
@@ -225,10 +228,10 @@ public final class UpdateChecker {
             
             let cleanVer = tagName.trimmingCharacters(in: CharacterSet(charactersIn: "vV \t\r\n"))
             let isNewer = isVersion(cleanVer, newerThan: currentVersion)
-            let title = "ChargeCap \(tagName)"
+            let title = "ChargePlan \(tagName)"
             let htmlUrl = "https://github.com/\(repoOwner)/\(repoName)/releases/tag/\(tagName)"
-            let dmgUrl = "https://github.com/\(repoOwner)/\(repoName)/raw/main/dist/ChargeCap.dmg"
-            let binaryUrl = "https://raw.githubusercontent.com/\(repoOwner)/\(repoName)/main/bin/chargecap"
+            let dmgUrl = "https://github.com/\(repoOwner)/\(repoName)/raw/main/dist/ChargePlan.dmg"
+            let binaryUrl = "https://raw.githubusercontent.com/\(repoOwner)/\(repoName)/main/bin/chargeplan"
             
             return ReleaseInfo(
                 version: cleanVer,
@@ -247,16 +250,16 @@ public final class UpdateChecker {
     
     // MARK: - App Installation & Swap
     
-    /// Downloads the DMG, extracts ChargeCap.app, replaces /Applications/ChargeCap.app, and optionally relaunches.
+    /// Downloads the DMG, extracts ChargePlan.app, replaces /Applications/ChargePlan.app, and optionally relaunches.
     public static func installAppUpdate(dmgUrl: URL, relaunch: Bool = true, progressHandler: @escaping (String) -> Void) async throws {
         progressHandler("Downloading update disk image…")
         
-        let tempDmg = URL(fileURLWithPath: "/tmp/ChargeCap-update-\(UUID().uuidString).dmg")
+        let tempDmg = URL(fileURLWithPath: "/tmp/ChargePlan-update-\(UUID().uuidString).dmg")
         defer { try? FileManager.default.removeItem(at: tempDmg) }
         
         var request = URLRequest(url: dmgUrl)
         request.timeoutInterval = 30.0
-        request.setValue("ChargeCap-Updater", forHTTPHeaderField: "User-Agent")
+        request.setValue("ChargePlan-Updater", forHTTPHeaderField: "User-Agent")
         
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
@@ -266,7 +269,7 @@ public final class UpdateChecker {
         try data.write(to: tempDmg)
         
         progressHandler("Mounting update disk image…")
-        let mountDir = URL(fileURLWithPath: "/tmp/chargecap-mnt-\(UUID().uuidString)")
+        let mountDir = URL(fileURLWithPath: "/tmp/chargeplan-mnt-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: mountDir, withIntermediateDirectories: true)
         defer {
             _ = runProcess("/usr/bin/hdiutil", ["detach", mountDir.path, "-quiet"])
@@ -278,20 +281,20 @@ public final class UpdateChecker {
             throw UpdateError.mountFailed(attachResult.output)
         }
         
-        let sourceApp = mountDir.appendingPathComponent("ChargeCap.app")
+        let sourceApp = mountDir.appendingPathComponent("ChargePlan.app")
         guard FileManager.default.fileExists(atPath: sourceApp.path) else {
             throw UpdateError.missingAppBundle
         }
         
-        progressHandler("Installing /Applications/ChargeCap.app…")
-        let destApp = URL(fileURLWithPath: "/Applications/ChargeCap.app")
+        progressHandler("Installing /Applications/ChargePlan.app…")
+        let destApp = URL(fileURLWithPath: "/Applications/ChargePlan.app")
         
         var installedViaDaemon = false
         var installSuccess = false
         var installErrorMsg = ""
         
         // Tier 1: Try user-level atomic move aside and copy
-        let trashOld = URL(fileURLWithPath: "/tmp/ChargeCap-old-\(UUID().uuidString).app")
+        let trashOld = URL(fileURLWithPath: "/tmp/ChargePlan-old-\(UUID().uuidString).app")
         var movedAside = false
         if FileManager.default.fileExists(atPath: destApp.path) {
             do {
@@ -320,7 +323,7 @@ public final class UpdateChecker {
         
         // Tier 2: If Tier 1 failed (e.g. root-owned bundle or permission denied), ask the root daemon
         if !installSuccess {
-            progressHandler("Requesting root daemon to install /Applications/ChargeCap.app…")
+            progressHandler("Requesting root daemon to install /Applications/ChargePlan.app…")
             if let resp = UnixSocketClient.send("INSTALL_APP \(sourceApp.path)"), resp.contains("\"success\":true") {
                 installSuccess = true
                 installedViaDaemon = true
@@ -333,9 +336,9 @@ public final class UpdateChecker {
         
         // Tier 3: If root daemon was not running or failed, fall back to AppleScript with administrator privileges
         if !installSuccess {
-            progressHandler("Requesting administrator approval to install /Applications/ChargeCap.app…")
+            progressHandler("Requesting administrator approval to install /Applications/ChargePlan.app…")
             let adminScript = """
-            do shell script "rm -rf '/Applications/ChargeCap.app' && cp -R '\(sourceApp.path)' '/Applications/ChargeCap.app' && chown -R $USER:admin '/Applications/ChargeCap.app' && xattr -cr '/Applications/ChargeCap.app' && codesign --force --deep --sign - '/Applications/ChargeCap.app'" with administrator privileges
+            do shell script "rm -rf '/Applications/ChargePlan.app' && cp -R '\(sourceApp.path)' '/Applications/ChargePlan.app' && chown -R $USER:admin '/Applications/ChargePlan.app' && xattr -cr '/Applications/ChargePlan.app' && codesign --force --deep --sign - '/Applications/ChargePlan.app'" with administrator privileges
             """
             var scriptError: NSDictionary?
             #if canImport(AppKit)
@@ -363,7 +366,7 @@ public final class UpdateChecker {
         
         // Automatically sync background daemon and CLI binaries if not already done by daemon INSTALL_APP
         if !installedViaDaemon {
-            let bundledCLI = destApp.appendingPathComponent("Contents/Resources/chargecap").path
+            let bundledCLI = destApp.appendingPathComponent("Contents/Resources/chargeplan").path
             if FileManager.default.isExecutableFile(atPath: bundledCLI) {
                 progressHandler("Automatically updating background daemon & CLI…")
                 // 1. If daemon is running, trigger seamless zero-password socket UPGRADE
@@ -371,9 +374,9 @@ public final class UpdateChecker {
                     progressHandler("Background daemon updated and restarted.")
                 } else if getuid() == 0 {
                     // 2. If running as root (e.g. CLI update), copy directly
-                    let daemonDir = "/Library/Application Support/ChargeCap"
-                    let daemonBin = "\(daemonDir)/ChargeCapDaemon"
-                    let cliBin = "/usr/local/bin/chargecap"
+                    let daemonDir = "/Library/Application Support/ChargePlan"
+                    let daemonBin = "\(daemonDir)/ChargePlanDaemon"
+                    let cliBin = "/usr/local/bin/chargeplan"
                     try? FileManager.default.createDirectory(atPath: daemonDir, withIntermediateDirectories: true)
                     try? FileManager.default.createDirectory(atPath: "/usr/local/bin", withIntermediateDirectories: true)
                     _ = runProcess("/usr/bin/install", ["-m", "755", bundledCLI, daemonBin])
@@ -382,7 +385,7 @@ public final class UpdateChecker {
                     _ = runProcess("/usr/bin/xattr", ["-cr", cliBin])
                     _ = runProcess("/usr/bin/codesign", ["--force", "--sign", "-", daemonBin])
                     _ = runProcess("/usr/bin/codesign", ["--force", "--sign", "-", cliBin])
-                    _ = runProcess("/bin/launchctl", ["kickstart", "-k", "system/com.wixe.chargecap.daemon"])
+                    _ = runProcess("/bin/launchctl", ["kickstart", "-k", "system/com.wixe.chargeplan.daemon"])
                 }
             }
         }
@@ -391,7 +394,7 @@ public final class UpdateChecker {
         clearCache()
         
         if relaunch {
-            progressHandler("Relaunching ChargeCap…")
+            progressHandler("Relaunching ChargePlan…")
             let relaunchProc = Process()
             relaunchProc.executableURL = URL(fileURLWithPath: "/usr/bin/open")
             relaunchProc.arguments = ["-n", destApp.path]
@@ -405,19 +408,19 @@ public final class UpdateChecker {
     
     // MARK: - CLI & Daemon Installation
     
-    /// Updates /usr/local/bin/chargecap and reloads the root LaunchDaemon. Requires root privileges.
+    /// Updates /usr/local/bin/chargeplan and reloads the root LaunchDaemon. Requires root privileges.
     public static func installCLIUpdate(binaryUrl: URL, progressHandler: @escaping (String) -> Void) async throws {
         guard getuid() == 0 else {
             throw UpdateError.rootRequired
         }
         
-        progressHandler("Downloading latest chargecap binary…")
-        let tempBin = URL(fileURLWithPath: "/tmp/chargecap-update-\(UUID().uuidString)")
+        progressHandler("Downloading latest chargeplan binary…")
+        let tempBin = URL(fileURLWithPath: "/tmp/chargeplan-update-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: tempBin) }
         
         var request = URLRequest(url: binaryUrl)
         request.timeoutInterval = 30.0
-        request.setValue("ChargeCap-Updater", forHTTPHeaderField: "User-Agent")
+        request.setValue("ChargePlan-Updater", forHTTPHeaderField: "User-Agent")
         
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
@@ -425,23 +428,23 @@ public final class UpdateChecker {
         }
         try data.write(to: tempBin)
         
-        progressHandler("Installing ChargeCapDaemon & CLI…")
-        let daemonDir = "/Library/Application Support/ChargeCap"
-        let daemonBin = "\(daemonDir)/ChargeCapDaemon"
+        progressHandler("Installing ChargePlanDaemon & CLI…")
+        let daemonDir = "/Library/Application Support/ChargePlan"
+        let daemonBin = "\(daemonDir)/ChargePlanDaemon"
         try? FileManager.default.createDirectory(atPath: daemonDir, withIntermediateDirectories: true)
         _ = runProcess("/usr/bin/install", ["-m", "755", tempBin.path, daemonBin])
         _ = runProcess("/usr/bin/xattr", ["-cr", daemonBin])
         _ = runProcess("/usr/bin/codesign", ["--force", "--sign", "-", daemonBin])
         
-        // Also install /usr/local/bin/chargecap
-        let dest = "/usr/local/bin/chargecap"
+        // Also install /usr/local/bin/chargeplan
+        let dest = "/usr/local/bin/chargeplan"
         _ = runProcess("/usr/bin/install", ["-m", "755", tempBin.path, dest])
         _ = runProcess("/usr/bin/xattr", ["-cr", dest])
         _ = runProcess("/usr/bin/codesign", ["--force", "--sign", "-", dest])
         
         progressHandler("Restarting LaunchDaemon…")
+        _ = runProcess("/bin/launchctl", ["kickstart", "-k", "system/com.wixe.chargeplan.daemon"])
         _ = runProcess("/bin/launchctl", ["kickstart", "-k", "system/com.wixe.chargecap.daemon"])
-        _ = runProcess("/bin/launchctl", ["kickstart", "-k", "system/com.wixe.chargecap"])
         
         // Clear cached update
         clearCache()

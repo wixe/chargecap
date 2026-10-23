@@ -4,11 +4,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$SCRIPT_DIR"
 
-BUILD_SCRATCH="/tmp/chargecap-dmg-build"
+BUILD_SCRATCH="/tmp/chargeplan-dmg-build"
 DIST_DIR="$SCRIPT_DIR/dist"
-STAGING_DIR="/tmp/chargecap-dmg-staging"
-APP_BUNDLE="$STAGING_DIR/ChargeCap.app"
-DMG_PATH="$DIST_DIR/ChargeCap.dmg"
+STAGING_DIR="/tmp/chargeplan-dmg-staging"
+APP_BUNDLE="$STAGING_DIR/ChargePlan.app"
+DMG_PATH="$DIST_DIR/ChargePlan.dmg"
 
 echo "🔨 Building Universal CLI & Menu Bar App (arm64 + x86_64)..."
 swift build -c release --build-system native --scratch-path "$BUILD_SCRATCH" --arch arm64
@@ -20,22 +20,22 @@ mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"
 
 echo "🧬 Creating Universal binaries with lipo..."
 lipo -create \
-    "$BUILD_SCRATCH/arm64-apple-macosx/release/chargecap" \
-    "$BUILD_SCRATCH/x86_64-apple-macosx/release/chargecap" \
-    -output "$SCRIPT_DIR/bin/chargecap"
-strip -x "$SCRIPT_DIR/bin/chargecap"
-codesign --force --sign - "$SCRIPT_DIR/bin/chargecap"
+    "$BUILD_SCRATCH/arm64-apple-macosx/release/chargeplan" \
+    "$BUILD_SCRATCH/x86_64-apple-macosx/release/chargeplan" \
+    -output "$SCRIPT_DIR/bin/chargeplan"
+strip -x "$SCRIPT_DIR/bin/chargeplan"
+codesign --force --sign - "$SCRIPT_DIR/bin/chargeplan"
 
 lipo -create \
-    "$BUILD_SCRATCH/arm64-apple-macosx/release/ChargeCapApp" \
-    "$BUILD_SCRATCH/x86_64-apple-macosx/release/ChargeCapApp" \
-    -output "$APP_BUNDLE/Contents/MacOS/ChargeCapApp"
-strip -x "$APP_BUNDLE/Contents/MacOS/ChargeCapApp"
+    "$BUILD_SCRATCH/arm64-apple-macosx/release/ChargePlanApp" \
+    "$BUILD_SCRATCH/x86_64-apple-macosx/release/ChargePlanApp" \
+    -output "$APP_BUNDLE/Contents/MacOS/ChargePlanApp"
+strip -x "$APP_BUNDLE/Contents/MacOS/ChargePlanApp"
 
-cp "$SCRIPT_DIR/bin/chargecap" "$APP_BUNDLE/Contents/Resources/chargecap"
-chmod 755 "$APP_BUNDLE/Contents/MacOS/ChargeCapApp" "$APP_BUNDLE/Contents/Resources/chargecap"
+cp "$SCRIPT_DIR/bin/chargeplan" "$APP_BUNDLE/Contents/Resources/chargeplan"
+chmod 755 "$APP_BUNDLE/Contents/MacOS/ChargePlanApp" "$APP_BUNDLE/Contents/Resources/chargeplan"
 
-VERSION="$(grep 'public let ChargeCapVersion =' Sources/ChargeCapCore/UpdateChecker.swift | cut -d '"' -f2)"
+VERSION="$(grep 'public let ChargePlanVersion =' Sources/ChargePlanCore/UpdateChecker.swift | cut -d '"' -f2)"
 
 cat > "$APP_BUNDLE/Contents/Info.plist" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -45,15 +45,15 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << EOF
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleExecutable</key>
-    <string>ChargeCapApp</string>
+    <string>ChargePlanApp</string>
     <key>CFBundleIdentifier</key>
-    <string>com.wixe.chargecap.app</string>
+    <string>com.wixe.chargeplan.app</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>ChargeCap</string>
+    <string>ChargePlan</string>
     <key>CFBundleDisplayName</key>
-    <string>ChargeCap</string>
+    <string>ChargePlan</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -80,21 +80,21 @@ ln -s /Applications "$STAGING_DIR/Applications"
 echo "💿 Packaging Drag-and-Drop DMG ($DMG_PATH)..."
 rm -f "$DMG_PATH"
 hdiutil create \
-    -volname "ChargeCap" \
+    -volname "ChargePlan" \
     -srcfolder "$STAGING_DIR" \
     -ov \
     -format UDZO \
     "$DMG_PATH"
 
-# Safely copy ChargeCap.app into /Applications on this Mac as well
+# Safely copy ChargePlan.app into /Applications on this Mac as well
 if [[ -w "/Applications" ]]; then
-    TRASH_OLD="/tmp/ChargeCap-build-old-$RANDOM.app"
-    mv /Applications/ChargeCap.app "$TRASH_OLD" 2>/dev/null || true
-    cp -R "$APP_BUNDLE" /Applications/ChargeCap.app 2>/dev/null || true
+    TRASH_OLD="/tmp/ChargePlan-build-old-$RANDOM.app"
+    mv /Applications/ChargePlan.app "$TRASH_OLD" 2>/dev/null || true
+    cp -R "$APP_BUNDLE" /Applications/ChargePlan.app 2>/dev/null || true
     rm -rf "$TRASH_OLD" 2>/dev/null || true
 fi
 
 rm -rf "$BUILD_SCRATCH" "$STAGING_DIR"
 
-echo "✅ Built $DMG_PATH and installed /Applications/ChargeCap.app"
+echo "✅ Built $DMG_PATH and installed /Applications/ChargePlan.app"
 ls -lh "$DMG_PATH"

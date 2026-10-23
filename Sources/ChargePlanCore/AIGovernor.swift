@@ -7,7 +7,7 @@ public class AIGovernor {
     public private(set) var state: GovernorState
     
     private var isRunning = false
-    private let queue = DispatchQueue(label: "com.wixe.chargecap.governor", qos: .utility)
+    private let queue = DispatchQueue(label: "com.wixe.chargeplan.governor", qos: .utility)
     private let stateLock = NSLock()
     
     public init(config: GovernorConfig = ConfigManager.shared.load()) {
@@ -181,7 +181,7 @@ public class AIGovernor {
                 "serial_number": batt.serialNumber
             ],
             "governor": [
-                "version": ChargeCapVersion,
+                "version": ChargePlanVersion,
                 "target_limit": config.targetLimit,
                 "deadband_enabled": config.deadbandEnabled,
                 "deadband_delta": config.deadbandDelta,

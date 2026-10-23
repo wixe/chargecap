@@ -3,17 +3,21 @@ import Foundation
 public class ConfigManager {
     public static let shared = ConfigManager()
     
-    private let systemConfigPath = "/etc/chargecap.json"
+    private let systemConfigPath = "/etc/chargeplan.json"
+    private let legacyConfigPath = "/etc/chargecap.json"
     private let userConfigPath: String
     
     public init() {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        self.userConfigPath = "\(home)/.config/chargecap/config.json"
+        self.userConfigPath = "\(home)/.config/chargeplan/config.json"
     }
     
     private var activePath: String {
         if FileManager.default.fileExists(atPath: systemConfigPath) {
             return systemConfigPath
+        }
+        if FileManager.default.fileExists(atPath: legacyConfigPath) {
+            return legacyConfigPath
         }
         if FileManager.default.isWritableFile(atPath: "/etc") {
             return systemConfigPath

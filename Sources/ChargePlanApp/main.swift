@@ -1,9 +1,9 @@
 import AppKit
 import Foundation
-import ChargeCapCore
+import ChargePlanCore
 
 @MainActor
-final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
+final class ChargePlanAppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var refreshTimer: Timer?
     private var settingsWindow: NSWindow?
@@ -34,7 +34,7 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
     private lazy var fallbackHardware = HardwareBackend()
     private let launchAgentPath: String = {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return "\(home)/Library/LaunchAgents/com.wixe.chargecap.app.plist"
+        return "\(home)/Library/LaunchAgents/com.wixe.chargeplan.app.plist"
     }()
     
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -106,17 +106,17 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
         
         let menu = NSMenu()
         
-        let titleItem = NSMenuItem(title: "⚡ ChargeCap Battery Governor", action: nil, keyEquivalent: "")
+        let titleItem = NSMenuItem(title: "⚡ ChargePlan Battery Governor", action: nil, keyEquivalent: "")
         titleItem.isEnabled = false
         menu.addItem(titleItem)
         
-        if let rel = latestRelease, UpdateChecker.isVersion(rel.version, newerThan: ChargeCapVersion) {
+        if let rel = latestRelease, UpdateChecker.isVersion(rel.version, newerThan: ChargePlanVersion) {
             let updateItem = NSMenuItem(title: "⬆️ Update Available (\(rel.tagName))…", action: #selector(triggerAppUpdate), keyEquivalent: "")
             updateItem.target = self
             menu.addItem(updateItem)
             menu.addItem(.separator())
         } else {
-            let latestItem = NSMenuItem(title: "✓ ChargeCap v\(ChargeCapVersion) (Latest)", action: nil, keyEquivalent: "")
+            let latestItem = NSMenuItem(title: "✓ ChargePlan v\(ChargePlanVersion) (Latest)", action: nil, keyEquivalent: "")
             latestItem.isEnabled = false
             menu.addItem(latestItem)
             menu.addItem(.separator())
@@ -180,7 +180,7 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
         
         menu.addItem(.separator())
         
-        let openSettingsItem = NSMenuItem(title: "Open ChargeCap Settings & Installer…", action: #selector(showSettingsWindow), keyEquivalent: ",")
+        let openSettingsItem = NSMenuItem(title: "Open ChargePlan Settings & Installer…", action: #selector(showSettingsWindow), keyEquivalent: ",")
         openSettingsItem.target = self
         menu.addItem(openSettingsItem)
         
@@ -215,7 +215,7 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
         
         menu.addItem(.separator())
         
-        let quitItem = NSMenuItem(title: "Quit ChargeCap Menu Bar", action: #selector(quitApp), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: "Quit ChargePlan Menu Bar", action: #selector(quitApp), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
         
@@ -230,14 +230,14 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
                 backing: .buffered,
                 defer: false
             )
-            win.title = "ChargeCap — Battery & Power Settings"
+            win.title = "ChargePlan — Battery & Power Settings"
             win.center()
             win.isReleasedWhenClosed = false
             
             let content = NSView(frame: win.contentView!.bounds)
             win.contentView = content
             
-            let title = NSTextField(labelWithString: "⚡ ChargeCap Power Governor")
+            let title = NSTextField(labelWithString: "⚡ ChargePlan Power Governor")
             title.font = NSFont.boldSystemFont(ofSize: 18)
             title.frame = NSRect(x: 24, y: 425, width: 412, height: 26)
             content.addSubview(title)
@@ -309,7 +309,7 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
             content.addSubview(deadbandCheck)
             self.deadbandCheckbox = deadbandCheck
             
-            let loginCheck = NSButton(checkboxWithTitle: "Show ChargeCap icon in macOS Menu Bar automatically at login", target: self, action: #selector(toggleLaunchAtLogin))
+            let loginCheck = NSButton(checkboxWithTitle: "Show ChargePlan icon in macOS Menu Bar automatically at login", target: self, action: #selector(toggleLaunchAtLogin))
             loginCheck.state = isLaunchAtLoginEnabled() ? .on : .off
             loginCheck.frame = NSRect(x: 24, y: 146, width: 416, height: 22)
             content.addSubview(loginCheck)
@@ -321,7 +321,7 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
             content.addSubview(uBox)
             self.updateBox = uBox
             
-            let uLabel = NSTextField(labelWithString: "ChargeCap v\(ChargeCapVersion)")
+            let uLabel = NSTextField(labelWithString: "ChargePlan v\(ChargePlanVersion)")
             uLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
             uLabel.frame = NSRect(x: 12, y: 30, width: 265, height: 20)
             uBox.contentView?.addSubview(uLabel)
@@ -362,12 +362,12 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
     
     private func isDaemonBinaryUpToDate(runningDaemonVersion: String? = nil) -> Bool {
         if let runningVer = runningDaemonVersion {
-            return UpdateChecker.compareVersion(runningVer, ChargeCapVersion) != .orderedAscending
+            return UpdateChecker.compareVersion(runningVer, ChargePlanVersion) != .orderedAscending
         }
         
-        let installed = FileManager.default.fileExists(atPath: "/Library/Application Support/ChargeCap/ChargeCapDaemon")
-            ? "/Library/Application Support/ChargeCap/ChargeCapDaemon"
-            : "/usr/local/bin/chargecap"
+        let installed = FileManager.default.fileExists(atPath: "/Library/Application Support/ChargePlan/ChargePlanDaemon")
+            ? "/Library/Application Support/ChargePlan/ChargePlanDaemon"
+            : "/usr/local/bin/chargeplan"
         guard FileManager.default.isExecutableFile(atPath: installed) else {
             return false
         }
@@ -384,7 +384,7 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
             if let str = String(data: data, encoding: .utf8) {
                 let parts = str.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: " ")
                 if let ver = parts.last {
-                    return UpdateChecker.compareVersion(ver, ChargeCapVersion) != .orderedAscending
+                    return UpdateChecker.compareVersion(ver, ChargePlanVersion) != .orderedAscending
                 }
             }
         } catch {
@@ -433,7 +433,7 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
         let govMode = daemonInfo.mode
         
         if daemonActive && upToDate {
-            daemonBadgeLabel?.stringValue = "✅ Background Daemon Active & Up-to-Date (/var/run/chargecap.sock)"
+            daemonBadgeLabel?.stringValue = "✅ Background Daemon Active & Up-to-Date (/var/run/chargeplan.sock)"
             daemonBadgeLabel?.textColor = .systemGreen
             installDaemonButton?.title = "Reinstall / Restart Daemon"
         } else if daemonActive && !upToDate {
@@ -463,19 +463,19 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
         
         // Update software updates section
         if isUpdatingApp {
-            updateLabel?.stringValue = "⚡ Updating ChargeCap…"
+            updateLabel?.stringValue = "⚡ Updating ChargePlan…"
             updateLabel?.textColor = .systemBlue
             updateSubLabel?.stringValue = updateStatusText
             updateActionButton?.title = "Updating…"
             updateActionButton?.isEnabled = false
-        } else if let rel = latestRelease, UpdateChecker.isVersion(rel.version, newerThan: ChargeCapVersion) {
+        } else if let rel = latestRelease, UpdateChecker.isVersion(rel.version, newerThan: ChargePlanVersion) {
             updateLabel?.stringValue = "🎉 Update Available: \(rel.tagName)"
             updateLabel?.textColor = .systemOrange
             updateSubLabel?.stringValue = updateStatusText.isEmpty ? "New version ready to install." : updateStatusText
             updateActionButton?.title = "Update Now"
             updateActionButton?.isEnabled = true
         } else {
-            updateLabel?.stringValue = "✓ ChargeCap v\(ChargeCapVersion) (Latest)"
+            updateLabel?.stringValue = "✓ ChargePlan v\(ChargePlanVersion) (Latest)"
             updateLabel?.textColor = .systemGreen
             updateSubLabel?.stringValue = updateStatusText.isEmpty ? "Up to date (Checked automatically)." : updateStatusText
             updateActionButton?.title = "Check Updates"
@@ -545,20 +545,20 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
     
     private func bundledCLIBinaryPath() -> String {
         if let resPath = Bundle.main.resourcePath {
-            let candidate = "\(resPath)/chargecap"
+            let candidate = "\(resPath)/chargeplan"
             if FileManager.default.isExecutableFile(atPath: candidate) {
                 return candidate
             }
         }
-        if FileManager.default.isExecutableFile(atPath: "/usr/local/bin/chargecap") {
-            return "/usr/local/bin/chargecap"
+        if FileManager.default.isExecutableFile(atPath: "/usr/local/bin/chargeplan") {
+            return "/usr/local/bin/chargeplan"
         }
-        return "/usr/local/bin/chargecap"
+        return "/usr/local/bin/chargeplan"
     }
     
     private func runPrivilegedCLI(_ subcommand: String) {
-        let cliPath = FileManager.default.isExecutableFile(atPath: "/usr/local/bin/chargecap")
-            ? "/usr/local/bin/chargecap"
+        let cliPath = FileManager.default.isExecutableFile(atPath: "/usr/local/bin/chargeplan")
+            ? "/usr/local/bin/chargeplan"
             : bundledCLIBinaryPath()
         let script = "do shell script \"'\(cliPath)' \(subcommand)\" with administrator privileges"
         let proc = Process()
@@ -570,7 +570,7 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
     
     @objc private func installDaemonAction() {
         let bundled = bundledCLIBinaryPath()
-        let cmd = "mkdir -p /usr/local/bin '/Library/Application Support/ChargeCap' && install -m 755 '\(bundled)' '/Library/Application Support/ChargeCap/ChargeCapDaemon' && install -m 755 '\(bundled)' /usr/local/bin/chargecap && xattr -cr '/Library/Application Support/ChargeCap/ChargeCapDaemon' /usr/local/bin/chargecap 2>/dev/null || true && codesign --force --sign - '/Library/Application Support/ChargeCap/ChargeCapDaemon' /usr/local/bin/chargecap 2>/dev/null || true && /usr/local/bin/chargecap install"
+        let cmd = "mkdir -p /usr/local/bin '/Library/Application Support/ChargePlan' && install -m 755 '\(bundled)' '/Library/Application Support/ChargePlan/ChargePlanDaemon' && install -m 755 '\(bundled)' /usr/local/bin/chargeplan && xattr -cr '/Library/Application Support/ChargePlan/ChargePlanDaemon' /usr/local/bin/chargeplan 2>/dev/null || true && codesign --force --sign - '/Library/Application Support/ChargePlan/ChargePlanDaemon' /usr/local/bin/chargeplan 2>/dev/null || true && /usr/local/bin/chargeplan install"
         let script = "do shell script \"\(cmd)\" with administrator privileges"
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
@@ -584,7 +584,7 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
     }
     
     @objc private func uninstallDaemonAction() {
-        let cmd = "/usr/local/bin/chargecap uninstall && rm -rf '/Library/Application Support/ChargeCap' /usr/local/bin/chargecap /var/run/chargecap.sock"
+        let cmd = "/usr/local/bin/chargeplan uninstall && rm -rf '/Library/Application Support/ChargePlan' '/Library/Application Support/ChargeCap' /usr/local/bin/chargeplan /var/run/chargeplan.sock /var/run/chargecap.sock"
         let script = "do shell script \"\(cmd)\" with administrator privileges"
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
@@ -605,14 +605,14 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
         if enabled {
             let parent = (launchAgentPath as NSString).deletingLastPathComponent
             try? fm.createDirectory(atPath: parent, withIntermediateDirectories: true)
-            let execPath = Bundle.main.executablePath ?? "/Applications/ChargeCap.app/Contents/MacOS/ChargeCapApp"
+            let execPath = Bundle.main.executablePath ?? "/Applications/ChargePlan.app/Contents/MacOS/ChargePlanApp"
             let plist = """
             <?xml version="1.0" encoding="UTF-8"?>
             <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
             <plist version="1.0">
             <dict>
                 <key>Label</key>
-                <string>com.wixe.chargecap.app</string>
+                <string>com.wixe.chargeplan.app</string>
                 <key>ProgramArguments</key>
                 <array>
                     <string>\(execPath)</string>
@@ -636,7 +636,7 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func checkUpdateSilently(force: Bool = false) async {
-        if let info = await UpdateChecker.checkForUpdate(currentVersion: ChargeCapVersion, force: force) {
+        if let info = await UpdateChecker.checkForUpdate(currentVersion: ChargePlanVersion, force: force) {
             await MainActor.run {
                 self.latestRelease = info
                 self.rebuildMenu()
@@ -646,7 +646,7 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
     }
     
     @objc private func updateActionButtonClicked() {
-        if let release = latestRelease, UpdateChecker.isVersion(release.version, newerThan: ChargeCapVersion) {
+        if let release = latestRelease, UpdateChecker.isVersion(release.version, newerThan: ChargePlanVersion) {
             triggerAppUpdate()
         } else {
             manualCheckUpdate()
@@ -655,7 +655,7 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
     
     @objc private func triggerAppUpdate() {
         showSettingsWindow()
-        guard let release = latestRelease, UpdateChecker.isVersion(release.version, newerThan: ChargeCapVersion) else { return }
+        guard let release = latestRelease, UpdateChecker.isVersion(release.version, newerThan: ChargePlanVersion) else { return }
         guard let dmgUrl = URL(string: release.dmgUrl) else { return }
         
         isUpdatingApp = true
@@ -694,7 +694,7 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
         updateActionButton?.isEnabled = false
         refreshSettingsWindow()
         Task {
-            let info = await UpdateChecker.checkForUpdate(currentVersion: ChargeCapVersion, force: true)
+            let info = await UpdateChecker.checkForUpdate(currentVersion: ChargePlanVersion, force: true)
             await MainActor.run {
                 self.latestRelease = info
                 self.updateActionButton?.isEnabled = true
@@ -702,7 +702,7 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
                 formatter.timeStyle = .short
                 let timeStr = formatter.string(from: Date())
                 
-                if let inf = info, UpdateChecker.isVersion(inf.version, newerThan: ChargeCapVersion) {
+                if let inf = info, UpdateChecker.isVersion(inf.version, newerThan: ChargePlanVersion) {
                     self.updateStatusText = "New release found: \(inf.tagName)"
                     self.rebuildMenu()
                     self.refreshSettingsWindow()
@@ -713,8 +713,8 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
                     self.refreshSettingsWindow()
                     if showAlertIfUpToDate {
                         let alert = NSAlert()
-                        alert.messageText = "ChargeCap is Up to Date"
-                        alert.informativeText = "Version \(ChargeCapVersion) is currently the newest version available."
+                        alert.messageText = "ChargePlan is Up to Date"
+                        alert.informativeText = "Version \(ChargePlanVersion) is currently the newest version available."
                         alert.alertStyle = .informational
                         alert.addButton(withTitle: "OK")
                         alert.runModal()
@@ -730,6 +730,6 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
 }
 
 let app = NSApplication.shared
-let delegate = MainActor.assumeIsolated { ChargeCapAppDelegate() }
+let delegate = MainActor.assumeIsolated { ChargePlanAppDelegate() }
 app.delegate = delegate
 app.run()

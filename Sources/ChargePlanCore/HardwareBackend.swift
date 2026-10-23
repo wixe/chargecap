@@ -14,7 +14,7 @@ public class HardwareBackend {
     private var activeMode: ChargingMode = .simulation
     private var currentLimit: Int = 50
     private var currentDelta: Int = 3
-    private let logger = Logger(subsystem: "com.wixe.chargecap", category: "HardwareBackend")
+    private let logger = Logger(subsystem: "com.wixe.chargeplan", category: "HardwareBackend")
     
     // Cached PowerUISmartChargeClient instance
     private var powerUIClient: AnyObject?
@@ -37,7 +37,7 @@ public class HardwareBackend {
         guard cls.responds(to: allocSel) else { return }
         let rawObj = cls.perform(allocSel).takeUnretainedValue()
         guard rawObj.responds(to: initSel) else { return }
-        let client = rawObj.perform(initSel, with: "chargecap").takeUnretainedValue()
+        let client = rawObj.perform(initSel, with: "chargeplan").takeUnretainedValue()
         
         let suppSel = NSSelectorFromString("isMCLSupported")
         let setSel = NSSelectorFromString("setMCLLimit:error:")

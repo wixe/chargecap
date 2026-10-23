@@ -1,16 +1,16 @@
 import Foundation
-import ChargeCapCore
+import ChargePlanCore
 
-let VERSION = ChargeCapVersion
+let VERSION = ChargePlanVersion
 
 func printHelp() {
     print("""
-    ⚡ ChargeCap — Intelligent, Lightweight Battery & Power Management for macOS
+    ⚡ ChargePlan — Intelligent, Lightweight Battery & Power Management for macOS
     Version \(VERSION) (Apple Silicon & Intel)
-    Website: https://github.com/wixe/chargecap
+    Website: https://github.com/wixe/chargeplan
     
     USAGE:
-      chargecap <command> [options]
+      chargeplan <command> [options]
     
     COMMANDS:
       status [--json]           Display battery health, power telemetry, and governor status
@@ -23,11 +23,11 @@ func printHelp() {
       version                   Print version information
     
     EXAMPLES:
-      chargecap status
-      sudo chargecap set 50
-      sudo chargecap deadband on 3
-      sudo chargecap install
-      sudo chargecap update
+      chargeplan status
+      sudo chargeplan set 50
+      sudo chargeplan deadband on 3
+      sudo chargeplan install
+      sudo chargeplan update
     """)
 }
 
@@ -54,7 +54,7 @@ func handleStatus(jsonOutput: Bool) {
     let cfg = ConfigManager.shared.load()
     let hw = HardwareBackend()
     
-    var governorMode = "Offline (Run 'sudo chargecap install')"
+    var governorMode = "Offline (Run 'sudo chargeplan install')"
     if let liveJson = UnixSocketClient.send("STATUS"),
        let data = liveJson.data(using: .utf8),
        let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -73,7 +73,7 @@ func handleStatus(jsonOutput: Bool) {
     
     print("""
     ========================================================================
-    ⚡ CHARGECAP POWER TELEMETRY & GOVERNOR
+    ⚡ CHARGEPLAN POWER TELEMETRY & GOVERNOR
     ========================================================================
       Battery Level:      \(status.percent)% (\(chargingStr))
       Target Limit:       \(cfg.targetLimit)% \(cfg.deadbandEnabled ? "(Deadband -\(cfg.deadbandDelta)%)" : "(Strict)")
@@ -88,33 +88,33 @@ func handleStatus(jsonOutput: Bool) {
     ========================================================================
     """)
     
-    if let cachedData = UserDefaults.standard.data(forKey: "com.wixe.chargecap.cachedReleaseInfo"),
+    if let cachedData = UserDefaults.standard.data(forKey: "com.wixe.chargeplan.cachedReleaseInfo"),
        let cached = try? JSONDecoder().decode(ReleaseInfo.self, from: cachedData),
-       UpdateChecker.isVersion(cached.version, newerThan: ChargeCapVersion) {
-        print("💡 Update available: \(cached.tagName) — Run 'sudo chargecap update' to upgrade.\n")
+       UpdateChecker.isVersion(cached.version, newerThan: ChargePlanVersion) {
+        print("💡 Update available: \(cached.tagName) — Run 'sudo chargeplan update' to upgrade.\n")
     }
 }
 
 func handleSet(args: [String]) {
     guard let first = args.first, let val = Int(first), (30...100).contains(val) else {
-        print("❌ Error: Please specify a valid limit between 30 and 100 (e.g. 'chargecap set 50')")
+        print("❌ Error: Please specify a valid limit between 30 and 100 (e.g. 'chargeplan set 50')")
         exit(1)
     }
     
     // 1. If background daemon is running, send command via socket (zero-sudo for console user / root)
     if let resp = UnixSocketClient.send("SET \(val)") {
         if resp.contains("\"success\":true") {
-            print("✅ ChargeCap daemon updated via socket: target limit is now \(val)%.")
+            print("✅ ChargePlan daemon updated via socket: target limit is now \(val)%.")
             return
         } else if resp.contains("Permission denied") {
-            print("❌ Permission denied by daemon. Please run with sudo: sudo chargecap set \(val)")
+            print("❌ Permission denied by daemon. Please run with sudo: sudo chargeplan set \(val)")
             exit(1)
         }
     }
     
     // 2. Direct modification requires root if daemon is not running
     guard getuid() == 0 else {
-        print("❌ Power control requires root privileges (or start background daemon with 'sudo chargecap install'):\n   sudo chargecap set \(val)")
+        print("❌ Power control requires root privileges (or start background daemon with 'sudo chargeplan install'):\n   sudo chargeplan set \(val)")
         exit(1)
     }
     
@@ -131,7 +131,7 @@ func handleSet(args: [String]) {
 
 func handleDeadband(args: [String]) {
     guard let first = args.first?.lowercased() else {
-        print("❌ Usage: chargecap deadband <on|off> [delta_percent]")
+        print("❌ Usage: chargeplan deadband <on|off> [delta_percent]")
         exit(1)
     }
     
@@ -147,14 +147,14 @@ func handleDeadband(args: [String]) {
             print("✅ Hysteresis deadband updated via socket: \(enabled ? "ENABLED (-\(delta)%)" : "DISABLED")")
             return
         } else if resp.contains("Permission denied") {
-            print("❌ Permission denied by daemon. Please run with sudo: sudo chargecap deadband \(args.joined(separator: " "))")
+            print("❌ Permission denied by daemon. Please run with sudo: sudo chargeplan deadband \(args.joined(separator: " "))")
             exit(1)
         }
     }
     
     // 2. Direct modification requires root if daemon is not running
     guard getuid() == 0 else {
-        print("❌ Power control requires root privileges (or start background daemon with 'sudo chargecap install'):\n   sudo chargecap deadband \(args.joined(separator: " "))")
+        print("❌ Power control requires root privileges (or start background daemon with 'sudo chargeplan install'):\n   sudo chargeplan deadband \(args.joined(separator: " "))")
         exit(1)
     }
     
@@ -169,7 +169,7 @@ func handleDeadband(args: [String]) {
 }
 
 func handleDaemon() {
-    print("🚀 Starting ChargeCap Governor Daemon...")
+    print("🚀 Starting ChargePlan Governor Daemon...")
     let cfg = ConfigManager.shared.load()
     let governor = AIGovernor(config: cfg)
     governor.start()
@@ -177,16 +177,16 @@ func handleDaemon() {
     let server = UnixSocketServer(governor: governor)
     server.start()
     ipcServer = server
-    print("🔌 ChargeCap Unix Socket listening at \(UnixSocketServer.defaultSocketPath)")
+    print("🔌 ChargePlan Unix Socket listening at \(UnixSocketServer.defaultSocketPath)")
     
     // Register signal handler for clean shutdown
     signal(SIGINT) { _ in
-        print("\n🛑 ChargeCap daemon terminating...")
+        print("\n🛑 ChargePlan daemon terminating...")
         ipcServer?.stop()
         exit(0)
     }
     signal(SIGTERM) { _ in
-        print("\n🛑 ChargeCap daemon terminating...")
+        print("\n🛑 ChargePlan daemon terminating...")
         ipcServer?.stop()
         exit(0)
     }
@@ -196,25 +196,25 @@ func handleDaemon() {
 
 func handleInstall() {
     guard getuid() == 0 else {
-        print("❌ Installation requires root privileges. Please run:\n   sudo chargecap install")
+        print("❌ Installation requires root privileges. Please run:\n   sudo chargeplan install")
         exit(1)
     }
     
     let selfPath = CommandLine.arguments[0]
     let binSource: String
-    if FileManager.default.isExecutableFile(atPath: selfPath) && !selfPath.contains("ChargeCapDaemon") {
+    if FileManager.default.isExecutableFile(atPath: selfPath) && !selfPath.contains("ChargePlanDaemon") {
         binSource = selfPath
-    } else if FileManager.default.fileExists(atPath: "/usr/local/bin/chargecap") {
-        binSource = "/usr/local/bin/chargecap"
+    } else if FileManager.default.fileExists(atPath: "/usr/local/bin/chargeplan") {
+        binSource = "/usr/local/bin/chargeplan"
     } else {
         binSource = selfPath
     }
     
-    let daemonDir = "/Library/Application Support/ChargeCap"
-    let daemonBin = "\(daemonDir)/ChargeCapDaemon"
+    let daemonDir = "/Library/Application Support/ChargePlan"
+    let daemonBin = "\(daemonDir)/ChargePlanDaemon"
     try? FileManager.default.createDirectory(atPath: daemonDir, withIntermediateDirectories: true)
     
-    // Copy binary as ChargeCapDaemon so macOS System Settings displays "ChargeCapDaemon"
+    // Copy binary as ChargePlanDaemon so macOS System Settings displays "ChargePlanDaemon"
     let cpDaemon = Process()
     cpDaemon.executableURL = URL(fileURLWithPath: "/bin/cp")
     cpDaemon.arguments = ["-f", binSource, daemonBin]
@@ -239,24 +239,24 @@ func handleInstall() {
     try? codesignDaemon.run()
     codesignDaemon.waitUntilExit()
     
-    // Ensure /usr/local/bin/chargecap exists for terminal usage
-    if !FileManager.default.fileExists(atPath: "/usr/local/bin/chargecap") {
+    // Ensure /usr/local/bin/chargeplan exists for terminal usage
+    if !FileManager.default.fileExists(atPath: "/usr/local/bin/chargeplan") {
         try? FileManager.default.createDirectory(atPath: "/usr/local/bin", withIntermediateDirectories: true)
         let cpCli = Process()
         cpCli.executableURL = URL(fileURLWithPath: "/bin/cp")
-        cpCli.arguments = ["-f", daemonBin, "/usr/local/bin/chargecap"]
+        cpCli.arguments = ["-f", daemonBin, "/usr/local/bin/chargeplan"]
         try? cpCli.run()
         cpCli.waitUntilExit()
         
         let chmodCli = Process()
         chmodCli.executableURL = URL(fileURLWithPath: "/bin/chmod")
-        chmodCli.arguments = ["755", "/usr/local/bin/chargecap"]
+        chmodCli.arguments = ["755", "/usr/local/bin/chargeplan"]
         try? chmodCli.run()
         chmodCli.waitUntilExit()
         
         let codesignCli = Process()
         codesignCli.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
-        codesignCli.arguments = ["--force", "--sign", "-", "/usr/local/bin/chargecap"]
+        codesignCli.arguments = ["--force", "--sign", "-", "/usr/local/bin/chargeplan"]
         try? codesignCli.run()
         codesignCli.waitUntilExit()
     }
@@ -267,7 +267,7 @@ func handleInstall() {
     <plist version="1.0">
     <dict>
         <key>Label</key>
-        <string>com.wixe.chargecap.daemon</string>
+        <string>com.wixe.chargeplan.daemon</string>
         <key>ProgramArguments</key>
         <array>
             <string>\(daemonBin)</string>
@@ -278,18 +278,17 @@ func handleInstall() {
         <key>KeepAlive</key>
         <true/>
         <key>StandardOutPath</key>
-        <string>/var/log/chargecap.log</string>
+        <string>/var/log/chargeplan.log</string>
         <key>StandardErrorPath</key>
-        <string>/var/log/chargecap.error.log</string>
+        <string>/var/log/chargeplan.error.log</string>
     </dict>
     </plist>
     """
     
-    let oldPlistPath = "/Library/LaunchDaemons/com.wixe.chargecap.plist"
-    let plistPath = "/Library/LaunchDaemons/com.wixe.chargecap.daemon.plist"
+    let plistPath = "/Library/LaunchDaemons/com.wixe.chargeplan.daemon.plist"
     
     // Bootout existing legacy or current label
-    for label in ["com.wixe.chargecap", "com.wixe.chargecap.daemon"] {
+    for label in ["com.wixe.chargeplan.daemon", "com.wixe.chargecap.daemon", "com.wixe.chargecap"] {
         let bootout = Process()
         bootout.executableURL = URL(fileURLWithPath: "/bin/launchctl")
         bootout.arguments = ["bootout", "system/\(label)"]
@@ -297,8 +296,9 @@ func handleInstall() {
         bootout.waitUntilExit()
     }
     
-    // Remove old legacy plist so macOS BTM removes the ghost "chargecap" entry
-    try? FileManager.default.removeItem(atPath: oldPlistPath)
+    // Remove legacy plists so macOS BTM cleans up old entries
+    try? FileManager.default.removeItem(atPath: "/Library/LaunchDaemons/com.wixe.chargecap.plist")
+    try? FileManager.default.removeItem(atPath: "/Library/LaunchDaemons/com.wixe.chargecap.daemon.plist")
     
     do {
         try plistContent.write(toFile: plistPath, atomically: true, encoding: .utf8)
@@ -320,15 +320,15 @@ func handleInstall() {
         // Ensure running daemon is restarted
         let kickstart = Process()
         kickstart.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        kickstart.arguments = ["kickstart", "-k", "system/com.wixe.chargecap.daemon"]
+        kickstart.arguments = ["kickstart", "-k", "system/com.wixe.chargeplan.daemon"]
         try? kickstart.run()
         kickstart.waitUntilExit()
         
-        print("✅ ChargeCap LaunchDaemon installed and bootstrapped successfully!")
-        print("   Daemon name: ChargeCapDaemon (\(daemonBin))")
-        print("   CLI command: chargecap (/usr/local/bin/chargecap)")
+        print("✅ ChargePlan LaunchDaemon installed and bootstrapped successfully!")
+        print("   Daemon name: ChargePlanDaemon (\(daemonBin))")
+        print("   CLI command: chargeplan (/usr/local/bin/chargeplan)")
         print("   Plist: \(plistPath)")
-        print("   Logs:  /var/log/chargecap.log")
+        print("   Logs:  /var/log/chargeplan.log")
     } catch {
         print("❌ Failed to install LaunchDaemon: \(error.localizedDescription)")
         exit(1)
@@ -337,7 +337,7 @@ func handleInstall() {
 
 func handleUninstall() {
     guard getuid() == 0 else {
-        print("❌ Uninstallation requires root privileges. Please run:\n   sudo chargecap uninstall")
+        print("❌ Uninstallation requires root privileges. Please run:\n   sudo chargeplan uninstall")
         exit(1)
     }
     
@@ -346,7 +346,7 @@ func handleUninstall() {
     _ = hw.setChargingInhibited(false)
     _ = hw.setChargeLimitPercentage(100)
     
-    for label in ["com.wixe.chargecap.daemon", "com.wixe.chargecap"] {
+    for label in ["com.wixe.chargeplan.daemon", "com.wixe.chargecap.daemon", "com.wixe.chargecap"] {
         let bootout = Process()
         bootout.executableURL = URL(fileURLWithPath: "/bin/launchctl")
         bootout.arguments = ["bootout", "system/\(label)"]
@@ -354,11 +354,14 @@ func handleUninstall() {
         bootout.waitUntilExit()
     }
     
+    try? FileManager.default.removeItem(atPath: "/Library/LaunchDaemons/com.wixe.chargeplan.daemon.plist")
     try? FileManager.default.removeItem(atPath: "/Library/LaunchDaemons/com.wixe.chargecap.daemon.plist")
     try? FileManager.default.removeItem(atPath: "/Library/LaunchDaemons/com.wixe.chargecap.plist")
+    try? FileManager.default.removeItem(atPath: "/Library/Application Support/ChargePlan")
     try? FileManager.default.removeItem(atPath: "/Library/Application Support/ChargeCap")
+    try? FileManager.default.removeItem(atPath: "/var/run/chargeplan.sock")
     try? FileManager.default.removeItem(atPath: "/var/run/chargecap.sock")
-    print("✅ ChargeCap LaunchDaemon uninstalled successfully.")
+    print("✅ ChargePlan LaunchDaemon uninstalled successfully.")
 }
 
 func handleUpdate(args: [String]) {
@@ -376,7 +379,7 @@ func handleUpdate(args: [String]) {
         }
         
         if !info.isNewer && !force {
-            print("✅ ChargeCap is already up to date! (v\(VERSION))")
+            print("✅ ChargePlan is already up to date! (v\(VERSION))")
             return
         }
         
@@ -389,17 +392,17 @@ func handleUpdate(args: [String]) {
         """)
         
         if checkOnly {
-            print("Run 'sudo chargecap update' to install.")
+            print("Run 'sudo chargeplan update' to install.")
             return
         }
         
         if getuid() != 0 {
-            // Check if user has write access to /Applications/ChargeCap.app and daemon socket is active
-            let appPath = "/Applications/ChargeCap.app"
+            // Check if user has write access to /Applications/ChargePlan.app and daemon socket is active
+            let appPath = "/Applications/ChargePlan.app"
             let appWritable = FileManager.default.isWritableFile(atPath: appPath) || FileManager.default.isWritableFile(atPath: "/Applications")
-            let socketActive = FileManager.default.fileExists(atPath: "/var/run/chargecap.sock")
+            let socketActive = FileManager.default.fileExists(atPath: "/var/run/chargeplan.sock")
             if appWritable && socketActive && !info.dmgUrl.isEmpty {
-                print("⚡ Updating ChargeCap.app and background daemon via root IPC (no sudo required)…")
+                print("⚡ Updating ChargePlan.app and background daemon via root IPC (no sudo required)…")
                 do {
                     guard let dmgUrl = URL(string: info.dmgUrl) else {
                         print("❌ Invalid DMG URL: \(info.dmgUrl)")
@@ -408,14 +411,14 @@ func handleUpdate(args: [String]) {
                     try await UpdateChecker.installAppUpdate(dmgUrl: dmgUrl, relaunch: false) { step in
                         print("   → \(step)")
                     }
-                    print("✅ ChargeCap successfully updated to \(info.tagName)!")
+                    print("✅ ChargePlan successfully updated to \(info.tagName)!")
                     return
                 } catch {
                     print("⚠️ Non-root update could not complete (\(error.localizedDescription)). Retrying with sudo requirement.")
                 }
             }
             
-            print("❌ Root privileges required to install update. Please run:\n   sudo chargecap update")
+            print("❌ Root privileges required to install update. Please run:\n   sudo chargeplan update")
             exit(1)
         }
         
@@ -428,16 +431,16 @@ func handleUpdate(args: [String]) {
                 print("   → \(step)")
             }
             
-            // If /Applications/ChargeCap.app exists, update it too
-            if FileManager.default.fileExists(atPath: "/Applications/ChargeCap.app"),
+            // If /Applications/ChargePlan.app exists, update it too
+            if FileManager.default.fileExists(atPath: "/Applications/ChargePlan.app"),
                let dmgUrl = URL(string: info.dmgUrl) {
-                print("🖥  Updating /Applications/ChargeCap.app...")
+                print("🖥  Updating /Applications/ChargePlan.app...")
                 try await UpdateChecker.installAppUpdate(dmgUrl: dmgUrl, relaunch: false) { step in
                     print("   → \(step)")
                 }
             }
             
-            print("✅ ChargeCap successfully updated to \(info.tagName)!")
+            print("✅ ChargePlan successfully updated to \(info.tagName)!")
         } catch {
             print("❌ Update failed: \(error.localizedDescription)")
             exit(1)
@@ -469,7 +472,7 @@ case "uninstall":
 case "update":
     handleUpdate(args: Array(args.dropFirst()))
 case "version", "--version", "-v":
-    print("ChargeCap version \(VERSION)")
+    print("ChargePlan version \(VERSION)")
 case "help", "--help", "-h":
     printHelp()
 default:

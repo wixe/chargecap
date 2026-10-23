@@ -2,12 +2,12 @@
 set -euo pipefail
 
 # ==============================================================================
-# ChargeCap Zero-Dependency Installer (Precompiled Universal Binary + Source)
-# https://github.com/wixe/chargecap
+# ChargePlan Zero-Dependency Installer (Precompiled Universal Binary + Source)
+# https://github.com/wixe/chargeplan
 # ==============================================================================
 
 echo "========================================================================"
-echo "⚡ Installing ChargeCap — Intelligent macOS Battery Governor"
+echo "⚡ Installing ChargePlan — Intelligent macOS Battery Governor"
 echo "========================================================================"
 
 if [[ $EUID -ne 0 ]]; then
@@ -20,67 +20,74 @@ INSTALL_DIR="/usr/local/bin"
 mkdir -p "$INSTALL_DIR"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" 2>/dev/null && pwd || pwd)"
-PREBUILT_PATH="$SCRIPT_DIR/bin/chargecap"
+PREBUILT_PATH="$SCRIPT_DIR/bin/chargeplan"
 BIN_PATH=""
 
 if [[ "${1:-}" == "--build" ]]; then
-    echo "🔨 Compiling ChargeCap from source..."
+    echo "🔨 Compiling ChargePlan from source..."
     cd "$SCRIPT_DIR"
     swift build -c release --build-system native || swift build -c release
-    if [[ -f "$SCRIPT_DIR/.build/arm64-apple-macosx/release/chargecap" ]]; then
-        BIN_PATH="$SCRIPT_DIR/.build/arm64-apple-macosx/release/chargecap"
+    if [[ -f "$SCRIPT_DIR/.build/arm64-apple-macosx/release/chargeplan" ]]; then
+        BIN_PATH="$SCRIPT_DIR/.build/arm64-apple-macosx/release/chargeplan"
     else
-        BIN_PATH="$SCRIPT_DIR/.build/release/chargecap"
+        BIN_PATH="$SCRIPT_DIR/.build/release/chargeplan"
     fi
 elif [[ -f "$PREBUILT_PATH" ]]; then
-    echo "📦 Using precompiled Universal binary (bin/chargecap)..."
+    echo "📦 Using precompiled Universal binary (bin/chargeplan)..."
     BIN_PATH="$PREBUILT_PATH"
 else
-    echo "⬇️  Downloading precompiled ChargeCap Universal binary from GitHub..."
-    TMP_BIN="$(mktemp /tmp/chargecap.XXXXXX)"
-    curl -fsSL "https://raw.githubusercontent.com/wixe/chargecap/main/bin/chargecap" -o "$TMP_BIN"
+    echo "⬇️  Downloading precompiled ChargePlan Universal binary from GitHub..."
+    TMP_BIN="$(mktemp /tmp/chargeplan.XXXXXX)"
+    curl -fsSL "https://raw.githubusercontent.com/wixe/chargeplan/main/bin/chargeplan" -o "$TMP_BIN"
     BIN_PATH="$TMP_BIN"
 fi
 
-echo "📦 Installing binary to $INSTALL_DIR/chargecap and /Library/Application Support/ChargeCap/ChargeCapDaemon..."
-mkdir -p "$INSTALL_DIR" "/Library/Application Support/ChargeCap"
-rm -f "$INSTALL_DIR/chargecap" "/Library/Application Support/ChargeCap/ChargeCapDaemon"
-install -m 755 "$BIN_PATH" "$INSTALL_DIR/chargecap"
-install -m 755 "$BIN_PATH" "/Library/Application Support/ChargeCap/ChargeCapDaemon"
-xattr -cr "$INSTALL_DIR/chargecap" "/Library/Application Support/ChargeCap/ChargeCapDaemon" 2>/dev/null || true
-codesign --force --sign - "$INSTALL_DIR/chargecap" 2>/dev/null || true
-codesign --force --sign - "/Library/Application Support/ChargeCap/ChargeCapDaemon" 2>/dev/null || true
+echo "📦 Installing binary to $INSTALL_DIR/chargeplan and /Library/Application Support/ChargePlan/ChargePlanDaemon..."
+mkdir -p "$INSTALL_DIR" "/Library/Application Support/ChargePlan"
+rm -f "$INSTALL_DIR/chargeplan" "/Library/Application Support/ChargePlan/ChargePlanDaemon"
+install -m 755 "$BIN_PATH" "$INSTALL_DIR/chargeplan"
+install -m 755 "$BIN_PATH" "/Library/Application Support/ChargePlan/ChargePlanDaemon"
+xattr -cr "$INSTALL_DIR/chargeplan" "/Library/Application Support/ChargePlan/ChargePlanDaemon" 2>/dev/null || true
+codesign --force --sign - "$INSTALL_DIR/chargeplan" 2>/dev/null || true
+codesign --force --sign - "/Library/Application Support/ChargePlan/ChargePlanDaemon" 2>/dev/null || true
 
-if [[ "$BIN_PATH" == /tmp/chargecap.* ]]; then
+if [[ "$BIN_PATH" == /tmp/chargeplan.* ]]; then
     rm -f "$BIN_PATH"
 fi
 
 echo "⚙️  Configuring LaunchDaemon..."
-rm -f /Library/LaunchDaemons/com.wixe.chargecap.plist 2>/dev/null || true
-"$INSTALL_DIR/chargecap" install
+# Clean up legacy ChargeCap plists and running services
+launchctl bootout system/com.wixe.chargecap.daemon 2>/dev/null || true
+launchctl bootout system/com.wixe.chargecap 2>/dev/null || true
+rm -f /Library/LaunchDaemons/com.wixe.chargecap.plist /Library/LaunchDaemons/com.wixe.chargecap.daemon.plist 2>/dev/null || true
 
-echo "🖥  Installing ChargeCap.app to /Applications..."
-DMG_PATH="$SCRIPT_DIR/dist/ChargeCap.dmg"
+"$INSTALL_DIR/chargeplan" install
+
+echo "🖥  Installing ChargePlan.app to /Applications..."
+DMG_PATH="$SCRIPT_DIR/dist/ChargePlan.dmg"
 TMP_DMG=""
 if [[ ! -f "$DMG_PATH" ]]; then
-    TMP_DMG="$(mktemp /tmp/ChargeCap.XXXXXX.dmg)"
-    curl -fsSL "https://github.com/wixe/chargecap/raw/main/dist/ChargeCap.dmg" -o "$TMP_DMG"
+    TMP_DMG="$(mktemp /tmp/ChargePlan.XXXXXX.dmg)"
+    curl -fsSL "https://github.com/wixe/chargeplan/raw/main/dist/ChargePlan.dmg" -o "$TMP_DMG"
     DMG_PATH="$TMP_DMG"
 fi
 
-MOUNT_DIR="$(mktemp -d /tmp/chargecap-mnt.XXXXXX)"
+MOUNT_DIR="$(mktemp -d /tmp/chargeplan-mnt.XXXXXX)"
 if hdiutil attach "$DMG_PATH" -mountpoint "$MOUNT_DIR" -nobrowse -quiet; then
-    rm -rf "/Applications/ChargeCap.app"
-    cp -R "$MOUNT_DIR/ChargeCap.app" "/Applications/ChargeCap.app"
+    rm -rf "/Applications/ChargePlan.app"
+    cp -R "$MOUNT_DIR/ChargePlan.app" "/Applications/ChargePlan.app"
     hdiutil detach "$MOUNT_DIR" -quiet || true
     
     CONSOLE_USER="$(stat -f '%Su' /dev/console 2>/dev/null || echo "${SUDO_USER:-}")"
     if [[ -n "$CONSOLE_USER" && "$CONSOLE_USER" != "root" ]]; then
-        chown -R "$CONSOLE_USER:admin" "/Applications/ChargeCap.app" 2>/dev/null || true
+        chown -R "$CONSOLE_USER:admin" "/Applications/ChargePlan.app" 2>/dev/null || true
     fi
     
-    xattr -cr "/Applications/ChargeCap.app" 2>/dev/null || true
-    codesign --force --deep --sign - "/Applications/ChargeCap.app" 2>/dev/null || true
+    xattr -cr "/Applications/ChargePlan.app" 2>/dev/null || true
+    codesign --force --deep --sign - "/Applications/ChargePlan.app" 2>/dev/null || true
+    
+    # Remove old ChargeCap app if present
+    rm -rf "/Applications/ChargeCap.app" 2>/dev/null || true
 fi
 rmdir "$MOUNT_DIR" 2>/dev/null || true
 if [[ -n "$TMP_DMG" ]]; then
@@ -88,6 +95,6 @@ if [[ -n "$TMP_DMG" ]]; then
 fi
 
 echo ""
-echo "✅ Installation complete! (/Applications/ChargeCap.app + Background Daemon)"
+echo "✅ Installation complete! (/Applications/ChargePlan.app + Background Daemon)"
 echo ""
-"$INSTALL_DIR/chargecap" status
+"$INSTALL_DIR/chargeplan" status

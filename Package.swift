@@ -2,45 +2,45 @@
 import PackageDescription
 
 let package = Package(
-    name: "ChargeCap",
+    name: "ChargePlan",
     platforms: [
         .macOS(.v13)
     ],
     products: [
         .executable(
-            name: "chargecap",
-            targets: ["ChargeCapCLI"]
+            name: "chargeplan",
+            targets: ["ChargePlanCLI"]
         ),
         .executable(
-            name: "ChargeCapApp",
-            targets: ["ChargeCapApp"]
+            name: "ChargePlanApp",
+            targets: ["ChargePlanApp"]
         ),
         .library(
-            name: "ChargeCapCore",
-            targets: ["ChargeCapCore"]
+            name: "ChargePlanCore",
+            targets: ["ChargePlanCore"]
         )
     ],
     dependencies: [],
     targets: [
         .target(
-            name: "ChargeCapCore",
+            name: "ChargePlanCore",
             dependencies: [],
-            path: "Sources/ChargeCapCore"
+            path: "Sources/ChargePlanCore"
         ),
         .executableTarget(
-            name: "ChargeCapCLI",
-            dependencies: ["ChargeCapCore"],
-            path: "Sources/ChargeCapCLI"
+            name: "ChargePlanCLI",
+            dependencies: ["ChargePlanCore"],
+            path: "Sources/ChargePlanCLI"
         ),
         .executableTarget(
-            name: "ChargeCapApp",
-            dependencies: ["ChargeCapCore"],
-            path: "Sources/ChargeCapApp"
+            name: "ChargePlanApp",
+            dependencies: ["ChargePlanCore"],
+            path: "Sources/ChargePlanApp"
         ),
         .testTarget(
-            name: "ChargeCapTests",
-            dependencies: ["ChargeCapCore"],
-            path: "Tests/ChargeCapTests"
+            name: "ChargePlanTests",
+            dependencies: ["ChargePlanCore"],
+            path: "Tests/ChargePlanTests"
         )
     ]
 )

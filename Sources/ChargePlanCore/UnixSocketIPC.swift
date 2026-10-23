@@ -2,13 +2,14 @@ import Foundation
 import Darwin
 
 public final class UnixSocketServer {
-    public static let defaultSocketPath = "/var/run/chargecap.sock"
+    public static let defaultSocketPath = "/var/run/chargeplan.sock"
+    public static let legacySocketPath = "/var/run/chargecap.sock"
     
     private let socketPath: String
     private var serverFD: Int32 = -1
     private var isRunning = false
     private weak var governor: AIGovernor?
-    private let acceptQueue = DispatchQueue(label: "com.wixe.chargecap.ipc", qos: .utility)
+    private let acceptQueue = DispatchQueue(label: "com.wixe.chargeplan.ipc", qos: .utility)
     
     public init(socketPath: String = UnixSocketServer.defaultSocketPath, governor: AIGovernor) {
         self.socketPath = socketPath
@@ -51,8 +52,6 @@ public final class UnixSocketServer {
             return
         }
         
-        // Allow local processes to connect for read-only STATUS;
-        // write commands (SET / SAILING) enforce root (euid == 0) via getpeereid().
         chmod(socketPath, 0o666)
         
         self.serverFD = fd
@@ -187,7 +186,7 @@ public final class UnixSocketServer {
             return "{\"success\":true,\"deadband_enabled\":\(enabled),\"deadband_delta\":\(delta)}\n"
             
         case "UPGRADE":
-            var sourcePath = "/Applications/ChargeCap.app/Contents/Resources/chargecap"
+            var sourcePath = "/Applications/ChargePlan.app/Contents/Resources/chargeplan"
             if parts.count >= 2 {
                 sourcePath = parts[1]
             }
@@ -206,9 +205,9 @@ public final class UnixSocketServer {
                 return "{\"error\":\"Source binary is invalid or corrupt\"}\n"
             }
             
-            let daemonDir = "/Library/Application Support/ChargeCap"
-            let daemonBin = "\(daemonDir)/ChargeCapDaemon"
-            let cliBin = "/usr/local/bin/chargecap"
+            let daemonDir = "/Library/Application Support/ChargePlan"
+            let daemonBin = "\(daemonDir)/ChargePlanDaemon"
+            let cliBin = "/usr/local/bin/chargeplan"
             
             try? FileManager.default.createDirectory(atPath: daemonDir, withIntermediateDirectories: true)
             try? FileManager.default.createDirectory(atPath: "/usr/local/bin", withIntermediateDirectories: true)
@@ -245,7 +244,7 @@ public final class UnixSocketServer {
                 exit(0)
             }
             
-            return "{\"success\":true,\"message\":\"ChargeCapDaemon & CLI updated. Restarting via launchd...\"}\n"
+            return "{\"success\":true,\"message\":\"ChargePlanDaemon & CLI updated. Restarting via launchd...\"}\n"
             
         case "INSTALL_APP":
             guard isAuthorized else {
@@ -258,8 +257,8 @@ public final class UnixSocketServer {
             guard FileManager.default.fileExists(atPath: sourceApp) && sourceApp.hasSuffix(".app") else {
                 return "{\"error\":\"Invalid source app path: \(sourceApp)\"}\n"
             }
-            let destApp = "/Applications/ChargeCap.app"
-            let trashOld = "/tmp/ChargeCap-old-\(UUID().uuidString).app"
+            let destApp = "/Applications/ChargePlan.app"
+            let trashOld = "/tmp/ChargePlan-old-\(UUID().uuidString).app"
             
             // Move aside existing app
             if FileManager.default.fileExists(atPath: destApp) {
@@ -277,6 +276,7 @@ public final class UnixSocketServer {
             cpProc.waitUntilExit()
             
             _ = try? FileManager.default.removeItem(atPath: trashOld)
+            _ = try? FileManager.default.removeItem(atPath: "/Applications/ChargeCap.app")
             
             // Fix ownership to the active console user so they own the app bundle
             let whoProc = Process()
@@ -309,11 +309,11 @@ public final class UnixSocketServer {
             cs.waitUntilExit()
             
             // Also install the bundled CLI and daemon binaries atomically
-            let bundledCLI = "\(destApp)/Contents/Resources/chargecap"
+            let bundledCLI = "\(destApp)/Contents/Resources/chargeplan"
             if FileManager.default.isExecutableFile(atPath: bundledCLI) {
-                let daemonDir = "/Library/Application Support/ChargeCap"
-                let daemonBin = "\(daemonDir)/ChargeCapDaemon"
-                let cliBin = "/usr/local/bin/chargecap"
+                let daemonDir = "/Library/Application Support/ChargePlan"
+                let daemonBin = "\(daemonDir)/ChargePlanDaemon"
+                let cliBin = "/usr/local/bin/chargeplan"
                 
                 let p1 = Process()
                 p1.executableURL = URL(fileURLWithPath: "/usr/bin/install")
@@ -346,7 +346,7 @@ public final class UnixSocketServer {
                 }
             }
             
-            return "{\"success\":true,\"message\":\"ChargeCap.app and daemon updated successfully.\"}\n"
+            return "{\"success\":true,\"message\":\"ChargePlan.app and daemon updated successfully.\"}\n"
             
         default:
             return "{\"error\":\"Unknown command. Supported: STATUS, SET <30-100>, DEADBAND <on|off> [1-10], UPGRADE [path], INSTALL_APP <path>\"}\n"
@@ -356,6 +356,17 @@ public final class UnixSocketServer {
 
 public enum UnixSocketClient {
     public static func send(_ command: String, socketPath: String = UnixSocketServer.defaultSocketPath) -> String? {
+        if let res = sendDirect(command, socketPath: socketPath) {
+            return res
+        }
+        // Fallback to legacy socket during migration if default socket wasn't available
+        if socketPath == UnixSocketServer.defaultSocketPath {
+            return sendDirect(command, socketPath: UnixSocketServer.legacySocketPath)
+        }
+        return nil
+    }
+    
+    private static func sendDirect(_ command: String, socketPath: String) -> String? {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { return nil }
         defer { close(fd) }

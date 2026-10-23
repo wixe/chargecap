@@ -1,7 +1,7 @@
 import XCTest
-@testable import ChargeCapCore
+@testable import ChargePlanCore
 
-final class ChargeCapTests: XCTestCase {
+final class ChargePlanTests: XCTestCase {
     func testBatteryMonitor() {
         let monitor = BatteryMonitor()
         let status = monitor.getCurrentStatus()
@@ -70,19 +70,19 @@ final class ChargeCapTests: XCTestCase {
     
     func testReleaseInfoSerialization() throws {
         let info = ReleaseInfo(
-            version: "0.3.0",
-            tagName: "v0.3.0",
-            title: "ChargeCap 0.3.0",
+            version: "0.4.0",
+            tagName: "v0.4.0",
+            title: "ChargePlan 0.4.0",
             releaseNotes: "Feature update",
-            htmlUrl: "https://github.com/wixe/chargecap/releases/tag/v0.3.0",
-            dmgUrl: "https://github.com/wixe/chargecap/raw/main/dist/ChargeCap.dmg",
-            binaryUrl: "https://raw.githubusercontent.com/wixe/chargecap/main/bin/chargecap",
+            htmlUrl: "https://github.com/wixe/chargeplan/releases/tag/v0.4.0",
+            dmgUrl: "https://github.com/wixe/chargeplan/raw/main/dist/ChargePlan.dmg",
+            binaryUrl: "https://raw.githubusercontent.com/wixe/chargeplan/main/bin/chargeplan",
             isNewer: true
         )
         let data = try JSONEncoder().encode(info)
         let decoded = try JSONDecoder().decode(ReleaseInfo.self, from: data)
-        XCTAssertEqual(decoded.version, "0.3.0")
-        XCTAssertEqual(decoded.tagName, "v0.3.0")
+        XCTAssertEqual(decoded.version, "0.4.0")
+        XCTAssertEqual(decoded.tagName, "v0.4.0")
         XCTAssertTrue(decoded.isNewer)
     }
 }
