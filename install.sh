@@ -42,11 +42,14 @@ else
     BIN_PATH="$TMP_BIN"
 fi
 
-echo "📦 Installing binary to $INSTALL_DIR/chargecap..."
-rm -f "$INSTALL_DIR/chargecap"
+echo "📦 Installing binary to $INSTALL_DIR/chargecap and /Library/Application Support/ChargeCap/ChargeCapDaemon..."
+mkdir -p "$INSTALL_DIR" "/Library/Application Support/ChargeCap"
+rm -f "$INSTALL_DIR/chargecap" "/Library/Application Support/ChargeCap/ChargeCapDaemon"
 install -m 755 "$BIN_PATH" "$INSTALL_DIR/chargecap"
-xattr -cr "$INSTALL_DIR/chargecap" 2>/dev/null || true
+install -m 755 "$BIN_PATH" "/Library/Application Support/ChargeCap/ChargeCapDaemon"
+xattr -cr "$INSTALL_DIR/chargecap" "/Library/Application Support/ChargeCap/ChargeCapDaemon" 2>/dev/null || true
 codesign --force --sign - "$INSTALL_DIR/chargecap" 2>/dev/null || true
+codesign --force --sign - "/Library/Application Support/ChargeCap/ChargeCapDaemon" 2>/dev/null || true
 
 if [[ "$BIN_PATH" == /tmp/chargecap.* ]]; then
     rm -f "$BIN_PATH"

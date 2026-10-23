@@ -90,11 +90,15 @@ sudo chargecap deadband off
 echo "STATUS" | nc -U /var/run/chargecap.sock
 sudo sh -c 'echo "SET 50" | nc -U /var/run/chargecap.sock'
 
-# Install background 24/7 LaunchDaemon
+# Install background 24/7 LaunchDaemon (displays as ChargeCapDaemon in System Settings)
 sudo chargecap install
 
 # Uninstall LaunchDaemon
 sudo chargecap uninstall
+
+# Check for updates or upgrade CLI & Menu Bar App from GitHub
+chargecap update --check
+sudo chargecap update
 ```
 
 ---

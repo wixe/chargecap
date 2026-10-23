@@ -350,11 +350,14 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
     private func isDaemonBinaryUpToDate() -> Bool {
         guard let resPath = Bundle.main.resourcePath else { return true }
         let bundled = "\(resPath)/chargecap"
+        let installed = FileManager.default.fileExists(atPath: "/Library/Application Support/ChargeCap/ChargeCapDaemon")
+            ? "/Library/Application Support/ChargeCap/ChargeCapDaemon"
+            : "/usr/local/bin/chargecap"
         guard FileManager.default.isExecutableFile(atPath: bundled),
-              FileManager.default.isExecutableFile(atPath: "/usr/local/bin/chargecap") else {
+              FileManager.default.isExecutableFile(atPath: installed) else {
             return false
         }
-        return FileManager.default.contentsEqual(atPath: bundled, andPath: "/usr/local/bin/chargecap")
+        return FileManager.default.contentsEqual(atPath: bundled, andPath: installed)
     }
     
     private func refreshSettingsWindow() {
@@ -478,7 +481,7 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
     
     @objc private func installDaemonAction() {
         let bundled = bundledCLIBinaryPath()
-        let cmd = "mkdir -p /usr/local/bin && rm -f /usr/local/bin/chargecap && install -m 755 '\(bundled)' /usr/local/bin/chargecap && xattr -cr /usr/local/bin/chargecap 2>/dev/null || true && codesign --force --sign - /usr/local/bin/chargecap 2>/dev/null || true && /usr/local/bin/chargecap install"
+        let cmd = "mkdir -p /usr/local/bin '/Library/Application Support/ChargeCap' && install -m 755 '\(bundled)' '/Library/Application Support/ChargeCap/ChargeCapDaemon' && install -m 755 '\(bundled)' /usr/local/bin/chargecap && xattr -cr '/Library/Application Support/ChargeCap/ChargeCapDaemon' /usr/local/bin/chargecap 2>/dev/null || true && codesign --force --sign - '/Library/Application Support/ChargeCap/ChargeCapDaemon' /usr/local/bin/chargecap 2>/dev/null || true && /usr/local/bin/chargecap install"
         let script = "do shell script \"\(cmd)\" with administrator privileges"
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
@@ -492,7 +495,7 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
     }
     
     @objc private func uninstallDaemonAction() {
-        let cmd = "/usr/local/bin/chargecap uninstall && rm -f /usr/local/bin/chargecap /var/run/chargecap.sock"
+        let cmd = "/usr/local/bin/chargecap uninstall && rm -rf '/Library/Application Support/ChargeCap' /usr/local/bin/chargecap /var/run/chargecap.sock"
         let script = "do shell script \"\(cmd)\" with administrator privileges"
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")

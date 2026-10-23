@@ -1,6 +1,6 @@
 import Foundation
 
-public let ChargeCapVersion = "0.2.0"
+public let ChargeCapVersion = "0.3.0"
 
 public struct ReleaseInfo: Codable, Equatable {
     public let version: String
@@ -315,13 +315,22 @@ public final class UpdateChecker {
         }
         try data.write(to: tempBin)
         
-        progressHandler("Installing to /usr/local/bin/chargecap…")
+        progressHandler("Installing ChargeCapDaemon & CLI…")
+        let daemonDir = "/Library/Application Support/ChargeCap"
+        let daemonBin = "\(daemonDir)/ChargeCapDaemon"
+        try? FileManager.default.createDirectory(atPath: daemonDir, withIntermediateDirectories: true)
+        _ = runProcess("/usr/bin/install", ["-m", "755", tempBin.path, daemonBin])
+        _ = runProcess("/usr/bin/xattr", ["-cr", daemonBin])
+        _ = runProcess("/usr/bin/codesign", ["--force", "--sign", "-", daemonBin])
+        
+        // Also install /usr/local/bin/chargecap
         let dest = "/usr/local/bin/chargecap"
         _ = runProcess("/usr/bin/install", ["-m", "755", tempBin.path, dest])
         _ = runProcess("/usr/bin/xattr", ["-cr", dest])
         _ = runProcess("/usr/bin/codesign", ["--force", "--sign", "-", dest])
         
         progressHandler("Restarting LaunchDaemon…")
+        _ = runProcess("/bin/launchctl", ["kickstart", "-k", "system/com.wixe.chargecap.daemon"])
         _ = runProcess("/bin/launchctl", ["kickstart", "-k", "system/com.wixe.chargecap"])
     }
     

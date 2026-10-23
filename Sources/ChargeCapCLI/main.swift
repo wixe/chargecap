@@ -184,14 +184,64 @@ func handleInstall() {
         exit(1)
     }
     
-    let binPath: String
+    let binSource: String
     if FileManager.default.fileExists(atPath: "/usr/local/bin/chargecap") {
-        binPath = "/usr/local/bin/chargecap"
+        binSource = "/usr/local/bin/chargecap"
     } else if FileManager.default.fileExists(atPath: "/opt/homebrew/bin/chargecap") {
-        binPath = "/opt/homebrew/bin/chargecap"
+        binSource = "/opt/homebrew/bin/chargecap"
     } else {
-        // Fall back to current executable
-        binPath = CommandLine.arguments[0]
+        binSource = CommandLine.arguments[0]
+    }
+    
+    let daemonDir = "/Library/Application Support/ChargeCap"
+    let daemonBin = "\(daemonDir)/ChargeCapDaemon"
+    try? FileManager.default.createDirectory(atPath: daemonDir, withIntermediateDirectories: true)
+    
+    // Copy binary as ChargeCapDaemon so macOS System Settings displays "ChargeCapDaemon"
+    let cpDaemon = Process()
+    cpDaemon.executableURL = URL(fileURLWithPath: "/bin/cp")
+    cpDaemon.arguments = ["-f", binSource, daemonBin]
+    try? cpDaemon.run()
+    cpDaemon.waitUntilExit()
+    
+    let chmodDaemon = Process()
+    chmodDaemon.executableURL = URL(fileURLWithPath: "/bin/chmod")
+    chmodDaemon.arguments = ["755", daemonBin]
+    try? chmodDaemon.run()
+    chmodDaemon.waitUntilExit()
+    
+    let xattrDaemon = Process()
+    xattrDaemon.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")
+    xattrDaemon.arguments = ["-cr", daemonBin]
+    try? xattrDaemon.run()
+    xattrDaemon.waitUntilExit()
+    
+    let codesignDaemon = Process()
+    codesignDaemon.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+    codesignDaemon.arguments = ["--force", "--sign", "-", daemonBin]
+    try? codesignDaemon.run()
+    codesignDaemon.waitUntilExit()
+    
+    // Ensure /usr/local/bin/chargecap exists for terminal usage
+    if !FileManager.default.fileExists(atPath: "/usr/local/bin/chargecap") {
+        try? FileManager.default.createDirectory(atPath: "/usr/local/bin", withIntermediateDirectories: true)
+        let cpCli = Process()
+        cpCli.executableURL = URL(fileURLWithPath: "/bin/cp")
+        cpCli.arguments = ["-f", daemonBin, "/usr/local/bin/chargecap"]
+        try? cpCli.run()
+        cpCli.waitUntilExit()
+        
+        let chmodCli = Process()
+        chmodCli.executableURL = URL(fileURLWithPath: "/bin/chmod")
+        chmodCli.arguments = ["755", "/usr/local/bin/chargecap"]
+        try? chmodCli.run()
+        chmodCli.waitUntilExit()
+        
+        let codesignCli = Process()
+        codesignCli.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        codesignCli.arguments = ["--force", "--sign", "-", "/usr/local/bin/chargecap"]
+        try? codesignCli.run()
+        codesignCli.waitUntilExit()
     }
     
     let plistContent = """
@@ -200,10 +250,10 @@ func handleInstall() {
     <plist version="1.0">
     <dict>
         <key>Label</key>
-        <string>com.wixe.chargecap</string>
+        <string>com.wixe.chargecap.daemon</string>
         <key>ProgramArguments</key>
         <array>
-            <string>\(binPath)</string>
+            <string>\(daemonBin)</string>
             <string>daemon</string>
         </array>
         <key>RunAtLoad</key>
@@ -227,12 +277,14 @@ func handleInstall() {
         try? chmod.run()
         chmod.waitUntilExit()
         
-        // Bootout existing if present
-        let bootout = Process()
-        bootout.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        bootout.arguments = ["bootout", "system/com.wixe.chargecap"]
-        try? bootout.run()
-        bootout.waitUntilExit()
+        // Bootout existing legacy or current label
+        for label in ["com.wixe.chargecap", "com.wixe.chargecap.daemon"] {
+            let bootout = Process()
+            bootout.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+            bootout.arguments = ["bootout", "system/\(label)"]
+            try? bootout.run()
+            bootout.waitUntilExit()
+        }
         
         Thread.sleep(forTimeInterval: 0.3)
         
@@ -243,16 +295,18 @@ func handleInstall() {
         try? bootstrap.run()
         bootstrap.waitUntilExit()
         
-        // Ensure running daemon is restarted with new binary
+        // Ensure running daemon is restarted
         let kickstart = Process()
         kickstart.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        kickstart.arguments = ["kickstart", "-k", "system/com.wixe.chargecap"]
+        kickstart.arguments = ["kickstart", "-k", "system/com.wixe.chargecap.daemon"]
         try? kickstart.run()
         kickstart.waitUntilExit()
         
         print("✅ ChargeCap LaunchDaemon installed and bootstrapped successfully!")
-        print("   Daemon is running 24/7 as root: \(plistPath)")
-        print("   Logs: /var/log/chargecap.log")
+        print("   Daemon name: ChargeCapDaemon (\(daemonBin))")
+        print("   CLI command: chargecap (/usr/local/bin/chargecap)")
+        print("   Plist: \(plistPath)")
+        print("   Logs:  /var/log/chargecap.log")
     } catch {
         print("❌ Failed to install LaunchDaemon: \(error.localizedDescription)")
         exit(1)
@@ -265,14 +319,18 @@ func handleUninstall() {
         exit(1)
     }
     
-    let plistPath = "/Library/LaunchDaemons/com.wixe.chargecap.plist"
-    let bootout = Process()
-    bootout.launchPath = "/bin/launchctl"
-    bootout.arguments = ["bootout", "system", plistPath]
-    try? bootout.run()
-    bootout.waitUntilExit()
+    for label in ["com.wixe.chargecap.daemon", "com.wixe.chargecap"] {
+        let bootout = Process()
+        bootout.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        bootout.arguments = ["bootout", "system/\(label)"]
+        try? bootout.run()
+        bootout.waitUntilExit()
+    }
     
+    let plistPath = "/Library/LaunchDaemons/com.wixe.chargecap.plist"
     try? FileManager.default.removeItem(atPath: plistPath)
+    try? FileManager.default.removeItem(atPath: "/Library/Application Support/ChargeCap")
+    try? FileManager.default.removeItem(atPath: "/var/run/chargecap.sock")
     print("✅ ChargeCap LaunchDaemon uninstalled successfully.")
 }
 
