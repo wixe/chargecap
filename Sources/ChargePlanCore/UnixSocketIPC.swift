@@ -189,8 +189,9 @@ public final class UnixSocketServer {
             guard isAuthorized else {
                 return "{\"error\":\"Permission denied: console user, admin, or root (sudo) privileges required to control power\"}\n"
             }
-            governor.hardware.kickPowerUIRefresh()
-            return "{\"success\":true,\"message\":\"Software power refresh kick dispatched.\"}\n"
+            _ = governor.triggerRefreshKick(reason: "Manual kick via IPC")
+            let batt = governor.monitor.getCurrentStatus()
+            return "{\"success\":true,\"message\":\"Software power refresh kick dispatched.\",\"kick_count\":\(governor.state.kickCount),\"percent\":\(batt.percent)}\n"
             
         case "KICK_COOLDOWN":
             guard isAuthorized else {

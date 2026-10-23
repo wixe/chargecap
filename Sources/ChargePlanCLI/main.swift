@@ -57,12 +57,19 @@ func handleStatus(jsonOutput: Bool) {
     let hw = HardwareBackend()
     
     var governorMode = "Offline (Run 'sudo chargeplan install')"
+    var kickDetails = ""
     if let liveJson = UnixSocketClient.send("STATUS"),
        let data = liveJson.data(using: .utf8),
        let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-       let gov = obj["governor"] as? [String: Any],
-       let mode = gov["mode"] as? String {
-        governorMode = mode
+       let gov = obj["governor"] as? [String: Any] {
+        if let mode = gov["mode"] as? String {
+            governorMode = mode
+        }
+        if let count = gov["kick_count"] as? Int, count > 0 {
+            let lastPct = gov["last_kick_percent"] as? Int
+            let pctStr = (lastPct != nil && lastPct! >= 0) ? " (last at \(lastPct!)%)" : ""
+            kickDetails = "\n  Power Latch Kicks:  \(count) triggered\(pctStr)"
+        }
     }
     
     let isAC = status.isACConnected
@@ -79,7 +86,7 @@ func handleStatus(jsonOutput: Bool) {
     ========================================================================
       Battery Level:      \(String(format: "%.2f%%", status.exactPercent)) (\(chargingStr))
       Target Limit:       \(cfg.targetLimit)% \(cfg.driftEnabled ? "(Drift -\(cfg.driftMargin)%)" : "(Strict)")
-      Governor State:     \(governorMode)
+      Governor State:     \(governorMode)\(kickDetails)
       Health Condition:   [\(bar)] \(status.healthPercent)%
       Cycle Count:        \(status.cycleCount) cycles
       Voltage & Current:  \(status.voltageMV) mV  •  \(status.amperageMA) mA (\(wattageStr))
@@ -176,7 +183,14 @@ func handleDrift(args: [String]) {
 func handleKick() {
     if let resp = UnixSocketClient.send("KICK") {
         if resp.contains("\"success\":true") {
-            print("⚡ Software refresh kick dispatched to powerd and PowerUIAgent.")
+            if let data = resp.data(using: .utf8),
+               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let count = obj["kick_count"] as? Int,
+               let pct = obj["percent"] as? Int {
+                print("⚡ Software refresh kick #\(count) dispatched at \(pct)% (signaled powerd & PowerUIAgent).")
+            } else {
+                print("⚡ Software refresh kick dispatched to powerd and PowerUIAgent.")
+            }
             return
         }
     }

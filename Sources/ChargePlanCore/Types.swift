@@ -233,6 +233,7 @@ public struct GovernorState: Codable {
     public var lastActionReason: String
     public var consecutiveErrors: Int
     public var lastKickTimestamp: Date?
+    public var lastKickPercent: Int?
     public var kickCount: Int
     
     // Backwards-compatible alias for inDeadband
@@ -252,6 +253,7 @@ public struct GovernorState: Codable {
             lastActionReason: "Daemon started",
             consecutiveErrors: 0,
             lastKickTimestamp: nil,
+            lastKickPercent: nil,
             kickCount: 0
         )
     }

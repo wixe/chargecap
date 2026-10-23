@@ -9,6 +9,7 @@ public class AIGovernor {
     private var isRunning = false
     private let queue = DispatchQueue(label: "io.github.wixe.chargeplan.governor", qos: .utility)
     private let stateLock = NSLock()
+    private var lastCapKickPercent: Int? = nil
     
     public init(config: GovernorConfig = ConfigManager.shared.load()) {
         self.monitor = BatteryMonitor()
@@ -52,6 +53,22 @@ public class AIGovernor {
         _ = hardware.setChargingInhibited(false)
     }
     
+    @discardableResult
+    public func triggerRefreshKick(reason: String = "Manual software kick requested") -> Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        let status = monitor.getCurrentStatus()
+        hardware.kickPowerUIRefresh()
+        state.lastKickTimestamp = Date()
+        state.lastKickPercent = status.percent
+        lastCapKickPercent = status.percent
+        state.kickCount += 1
+        state.lastActionTimestamp = Date()
+        state.lastActionReason = "\(reason) (at \(status.percent)%). Latch kick #\(state.kickCount)."
+        state.modeDescription = "Kicking powerd to halt charge (Battery at \(status.percent)%, Kick #\(state.kickCount))"
+        return true
+    }
+    
     public func evaluateTick() {
         let status = monitor.getCurrentStatus()
         let diskConfig = ConfigManager.shared.load()
@@ -66,6 +83,7 @@ public class AIGovernor {
         
         guard status.isACConnected else {
             state.modeDescription = "Running on Battery Power (\(status.percent)%)"
+            lastCapKickPercent = nil
             return
         }
         
@@ -111,20 +129,31 @@ public class AIGovernor {
                 // trigger a rate-limited software kick to latch powerd into AC pass-through.
                 let isDrawingCharge = status.isCharging || status.amperageMA > 50
                 if isDrawingCharge {
-                    let cooldown = max(15.0, config.kickCooldownSeconds)
+                    let cooldown = max(10.0, config.kickCooldownSeconds)
                     let timeSinceLastKick = state.lastKickTimestamp.map { Date().timeIntervalSince($0) } ?? Double.infinity
                     
-                    if timeSinceLastKick >= cooldown {
+                    // Trigger manual kick whenever battery goes up a percent over limit,
+                    // or when the cooldown timer elapses while still drawing charge.
+                    // Guard with a 10s minimum interval to avoid rapid gauge fluttering.
+                    let percentRose = (lastCapKickPercent == nil || status.percent > lastCapKickPercent!) && timeSinceLastKick >= 10.0
+                    let cooldownElapsed = timeSinceLastKick >= cooldown
+                    
+                    if percentRose || cooldownElapsed {
                         hardware.kickPowerUIRefresh()
                         state.lastKickTimestamp = Date()
+                        state.lastKickPercent = status.percent
+                        lastCapKickPercent = status.percent
                         state.kickCount += 1
                         state.lastActionTimestamp = Date()
-                        state.lastActionReason = "Over-limit charge detected (\(status.percent)% >= \(effectiveTarget)%, \(status.amperageMA)mA). Triggered latch kick #\(state.kickCount)."
-                        state.modeDescription = "Kicking powerd to halt charge (Kick #\(state.kickCount))"
+                        let triggerReason = percentRose
+                            ? "SoC increased to \(status.percent)%"
+                            : "Cooldown elapsed (\(Int(cooldown))s)"
+                        state.lastActionReason = "Over-limit charge detected (\(status.percent)% >= \(effectiveTarget)%, \(status.amperageMA)mA via \(triggerReason)). Triggered latch kick #\(state.kickCount)."
+                        state.modeDescription = "Kicking powerd to halt charge (Battery at \(status.percent)%, Kick #\(state.kickCount))"
                         return
                     } else {
                         let remaining = Int(ceil(cooldown - timeSinceLastKick))
-                        state.modeDescription = "Holding Cap at \(effectiveTarget)%\(floorSuffix) (settling powerd, cooldown \(remaining)s)"
+                        state.modeDescription = "Holding Cap at \(effectiveTarget)%\(floorSuffix) (settling at \(status.percent)%, armed for \(status.percent + 1)%, cooldown \(remaining)s)"
                         return
                     }
                 }
@@ -132,10 +161,12 @@ public class AIGovernor {
                     ? "Holding Cap at \(effectiveTarget)%\(floorSuffix) (Idle AC Pass-Through)"
                     : "Holding Cap at \(effectiveTarget)%\(floorSuffix) (AC Pass-Through)"
             } else if status.percent <= lowerBound && config.driftEnabled {
+                lastCapKickPercent = nil
                 // Firmware will top up on its own; we do not disable the limit.
                 state.inDrift = false
                 state.modeDescription = "Native limit armed at \(effectiveTarget)%\(floorSuffix) — battery at \(status.percent)% (topping up)"
             } else {
+                lastCapKickPercent = nil
                 state.modeDescription = "Native SoC ceiling active at \(effectiveTarget)%\(floorSuffix) (\(status.percent)%)"
             }
             return
@@ -216,6 +247,7 @@ public class AIGovernor {
                 "kick_cooldown_seconds": config.kickCooldownSeconds,
                 "kick_count": state.kickCount,
                 "last_kick_time": state.lastKickTimestamp.map { ISO8601DateFormatter().string(from: $0) } ?? "",
+                "last_kick_percent": state.lastKickPercent ?? -1,
                 "charging_inhibited": state.isChargingInhibited,
                 "thermal_throttled": state.isThermalThrottled,
                 "mode": state.modeDescription,

@@ -367,6 +367,10 @@ final class ChargePlanAppDelegate: NSObject, NSApplicationDelegate {
         
         menu.addItem(.separator())
         
+        let kickItem = NSMenuItem(title: "⚡ Manual Power Latch Kick", action: #selector(triggerManualKick), keyEquivalent: "")
+        kickItem.target = self
+        menu.addItem(kickItem)
+        
         let openSettingsItem = NSMenuItem(title: "Open ChargePlan Settings & Installer…", action: #selector(showSettingsWindow), keyEquivalent: ",")
         openSettingsItem.target = self
         menu.addItem(openSettingsItem)
@@ -720,6 +724,17 @@ final class ChargePlanAppDelegate: NSObject, NSApplicationDelegate {
         } else {
             runPrivilegedCLI("drift off")
         }
+        rebuildMenu()
+        refreshSettingsWindow()
+    }
+    
+    @objc private func triggerManualKick() {
+        if let resp = UnixSocketClient.send("KICK"), resp.contains("\"success\":true") {
+            rebuildMenu()
+            refreshSettingsWindow()
+            return
+        }
+        fallbackHardware.kickPowerUIRefresh()
         rebuildMenu()
         refreshSettingsWindow()
     }

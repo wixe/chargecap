@@ -95,19 +95,39 @@ final class ChargePlanTests: XCTestCase {
     
     func testReleaseInfoSerialization() throws {
         let info = ReleaseInfo(
-            version: "0.4.1",
-            tagName: "v0.4.1",
-            title: "ChargePlan 0.4.1",
+            version: "0.4.2",
+            tagName: "v0.4.2",
+            title: "ChargePlan 0.4.2",
             releaseNotes: "Feature update",
-            htmlUrl: "https://github.com/wixe/chargeplan/releases/tag/v0.4.1",
+            htmlUrl: "https://github.com/wixe/chargeplan/releases/tag/v0.4.2",
             dmgUrl: "https://github.com/wixe/chargeplan/raw/main/dist/ChargePlan.dmg",
             binaryUrl: "https://raw.githubusercontent.com/wixe/chargeplan/main/bin/chargeplan",
             isNewer: true
         )
         let data = try JSONEncoder().encode(info)
         let decoded = try JSONDecoder().decode(ReleaseInfo.self, from: data)
-        XCTAssertEqual(decoded.version, "0.4.1")
-        XCTAssertEqual(decoded.tagName, "v0.4.1")
+        XCTAssertEqual(decoded.version, "0.4.2")
+        XCTAssertEqual(decoded.tagName, "v0.4.2")
         XCTAssertTrue(decoded.isNewer)
+    }
+    
+    func testGovernorKickState() {
+        var state = GovernorState.initial
+        XCTAssertNil(state.lastKickPercent)
+        XCTAssertEqual(state.kickCount, 0)
+        
+        state.lastKickPercent = 80
+        state.kickCount = 1
+        XCTAssertEqual(state.lastKickPercent, 80)
+        XCTAssertEqual(state.kickCount, 1)
+        
+        let governor = AIGovernor()
+        let report = governor.getCombinedReport()
+        guard let gov = report["governor"] as? [String: Any] else {
+            XCTFail("Missing governor dictionary")
+            return
+        }
+        XCTAssertNotNil(gov["kick_count"])
+        XCTAssertNotNil(gov["last_kick_percent"])
     }
 }
