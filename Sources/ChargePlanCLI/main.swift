@@ -16,9 +16,9 @@ func printHelp() {
       status [--json]           Display battery health, power telemetry, and governor status
       set <limit>               Set target charge limit (e.g. 50, 80)
       deadband <on|off> [delta] Configure hysteresis deadband (e.g. deadband on 3)
-      daemon                    Run the AI power management governor in the foreground
-      install                   Install and bootstrap background LaunchDaemon (runs 24/7 as root)
-      uninstall                 Remove and unload background LaunchDaemon
+      daemon                    Run the power governor in the foreground
+      install                   Install background system service (keeps limit active when sleeping or logged out)
+      uninstall                 Remove background system service
       update [--check|--force]  Check GitHub and automatically upgrade binary and .app
       version                   Print version information
     

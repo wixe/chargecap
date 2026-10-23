@@ -1,6 +1,6 @@
 # ChargePlan ⚡🔋
 
-> **Intelligent, lightweight macOS battery & power governor.** Stop battery degradation, prevent silent SMC charge creep, and manage Apple Silicon & Intel batteries with closed-loop AI telemetry.
+> **Native, lightweight macOS battery & power governor.** Stop battery degradation, prevent hardware charge creep, and maintain custom charge ceilings with closed-loop telemetry.
 
 [![Build](https://github.com/wixe/chargeplan/actions/workflows/build.yml/badge.svg)](https://github.com/wixe/chargeplan/actions)
 [![Platform](https://img.shields.io/badge/platform-macOS%2013%2B-blue.svg)](https://apple.com/macos)
@@ -12,14 +12,14 @@
 
 ## ⚡ What is ChargePlan?
 
-**ChargePlan** is a native, featherweight closed-loop power governor, menu bar app, and CLI designed for Apple Silicon (M1/M2/M3/M4) and Intel MacBooks:
+**ChargePlan** is a native, featherweight power governor, menu bar app, and CLI utility designed for Apple Silicon (M1/M2/M3/M4) and Intel MacBooks:
 
-* **Closed-Loop SMC Verification:** Instead of writing a charge target once and hoping the hardware remembers it after sleep, lid closing, or USB-C PD negotiation, ChargePlan monitors IOKit power events continuously and re-enforces your limit in sub-second time.
-* **True AC Pass-Through:** Inhibits cell charging while routing 100% of system load directly from the wall adapter (`0 mA` battery current, `0.00W` battery stress) without cutting AC input.
-* **Hysteresis Deadband Control:** Prevents constant micro-trickling into lithium cells by allowing State of Charge (SoC) to float naturally within a configurable deadband window (e.g. 47%–50% for a 50% storage limit).
-* **Thermal-Aware Chemistry Protection:** Automatically throttles or inhibits charging when battery or system thermal pressure rises, preventing additive thermal stress (charging heat + CPU/GPU load).
-* **Menu Bar UI + Headless LaunchDaemon:** Includes a native macOS Menu Bar app (`ChargePlan.app`) with a live Settings window alongside a 24/7 root `LaunchDaemon` that operates even when no user is logged in.
-* **Bidirectional Unix Socket IPC:** Communicates over `/var/run/chargeplan.sock` with kernel-level `getpeereid()` root verification for power control commands and zero network stack overhead.
+* **Closed-Loop Hardware Verification:** Instead of writing a charge target once and hoping the hardware remembers it after sleep, lid closing, or USB-C PD negotiation, ChargePlan monitors system power events and continuously re-asserts your configured limit.
+* **True AC Pass-Through:** Inhibits cell charging while powering system load directly from the wall adapter (`0 mA` battery current, `0.00W` battery stress) without cutting AC input.
+* **Hysteresis Deadband Control:** Prevents constant micro-trickling into lithium cells by allowing State of Charge (SoC) to float naturally within a configurable window (e.g. 47%–50% for a 50% storage limit).
+* **Thermal-Aware Chemistry Protection:** Automatically throttles or pauses charging when system or battery thermal pressure rises, reducing additive heat stress.
+* **Menu Bar App & Background Service:** Includes a native macOS Menu Bar app (`ChargePlan.app`) with a live Settings dashboard alongside a standard macOS system service so limits remain enforced even when logged out or sleeping.
+* **Local IPC Control:** Communicates locally via `/var/run/chargeplan.sock` with standard POSIX peer credential validation, keeping controls secure without opening any network ports.
 * **Ultra-Lightweight:** Compiled native Swift binary is **< 300 KB** with **< 10 MB RAM** footprint, zero open TCP/UDP ports, and 0% CPU usage.
 
 ---
@@ -28,13 +28,13 @@
 
 | Capability | ChargePlan Implementation |
 | :--- | :--- |
-| **Control Loop Architecture** | Closed-loop IOKit event observer + periodic SMC register verification |
-| **Power Path Routing** | Hardware AC Pass-Through (`AppleSmartBatteryManager` / AppleSMC charge inhibit) |
+| **Control Loop Architecture** | Closed-loop power event observer + periodic hardware register verification |
+| **Power Path Routing** | Hardware AC Pass-Through (`AppleSmartBatteryManager` / system power management) |
 | **Charge Regulation** | Configurable target setpoint (30%–100%) with **Hysteresis Deadband** (`±1%` to `±10%`) |
-| **Thermal Governor** | Automatic charge inhibition under `Serious` / `Critical` IOKit thermal pressure |
-| **Privilege Separation** | Read-only telemetry for standard users; kernel `getpeereid() == 0` required for writes |
-| **IPC Transport** | Pure POSIX `AF_UNIX` domain socket (`/var/run/chargeplan.sock`) with `500ms` timeouts |
-| **Desktop & Headless Modes** | Native AppKit Menu Bar + Settings app (`ChargePlan.app`) & root `LaunchDaemon` |
+| **Thermal Protection** | Automatic charge inhibition under elevated IOKit thermal pressure |
+| **Security & Access** | Non-privileged read telemetry; administrative group or console ownership for setting limits |
+| **IPC Transport** | Local POSIX domain socket (`/var/run/chargeplan.sock`) with standard timeouts |
+| **Operating Modes** | Native AppKit Menu Bar app (`ChargePlan.app`) and background system service |
 | **Footprint & License** | **< 300 KB** Universal binary, **< 10 MB RAM**, **0% CPU**, **100% Open Source (MIT)** |
 
 ---
@@ -42,9 +42,9 @@
 ## 🚀 Quick Start (No Compiler or Terminal Required)
 
 ### Option 1: macOS Menu Bar App (`ChargePlan.dmg` — Drag & Drop)
-1. Download **[`ChargePlan.dmg`](https://github.com/wixe/chargeplan/raw/main/dist/ChargePlan.dmg)** and open it.
+1. Download **[`ChargePlan.dmg`](https://github.com/wixe/chargeplan/releases/latest/download/ChargePlan.dmg)** and open it.
 2. Drag **`ChargePlan.app`** into the **`Applications`** folder.
-3. Open **`ChargePlan`** from `/Applications` — it adds the **`⚡ ChargePlan`** icon to your top-right macOS Menu Bar, opens the Settings window, and lets you install/uninstall the background governor or adjust charge limits with 1 click.
+3. Open **`ChargePlan`** from `/Applications` — it adds the **`⚡ ChargePlan`** icon to your top-right macOS Menu Bar, opens the Settings window, and lets you manage background services or adjust charge limits with 1 click.
    > **Note on macOS Gatekeeper:** Because ChargePlan is free, open-source software signed ad-hoc (`codesign --sign -`), macOS may show an *"unverified developer"* prompt the first time you open a browser-downloaded `.dmg`. Either click **Open Anyway** in **System Settings → Privacy & Security**, or run `xattr -cr /Applications/ChargePlan.app` once in Terminal (or use Option 2 below, which bypasses browser quarantine automatically).
 
 ### Option 2: One-Line Terminal Install
@@ -66,9 +66,9 @@ sudo ./install.sh --build
 
 ---
 
-## 💻 CLI & Unix Socket Usage
+## 💻 CLI & Local Socket Usage
 
-ChargePlan includes a clean CLI and bidirectional Unix Domain Socket (`/var/run/chargeplan.sock`):
+ChargePlan includes a clean CLI and local Unix Domain Socket (`/var/run/chargeplan.sock`):
 
 ```bash
 # Display live battery health, voltage, wattage, and governor status (no sudo required)
@@ -86,14 +86,14 @@ chargeplan deadband on 3
 # Turn off hysteresis deadband / strict cap (requires sudo or running daemon)
 chargeplan deadband off
 
-# Query or control directly via Unix socket pipe
+# Query or control directly via local socket
 echo "STATUS" | nc -U /var/run/chargeplan.sock
 echo "SET 50" | nc -U /var/run/chargeplan.sock
 
-# Install background 24/7 LaunchDaemon (displays as ChargePlanDaemon in System Settings)
+# Install background service (keeps limits enforced when sleeping or logged out)
 sudo chargeplan install
 
-# Uninstall LaunchDaemon
+# Uninstall background service
 sudo chargeplan uninstall
 
 # Check for updates or upgrade CLI & Menu Bar App from GitHub
@@ -119,7 +119,7 @@ Running `chargeplan status` displays high-precision hardware diagnostics:
   Voltage & Current:  11389 mV  •  0 mA (0.00W)
   Hardware Capacity:  3777 / 4382 mAh
   Thermal State:      Nominal
-  Hardware Backend:   Direct AppleSMC Driver (AC Pass-Through)
+  Hardware Backend:   macOS Native PowerUI (AC Pass-Through)
   Serial Number:      D862125AQVYPJYRA4
 ========================================================================
 ```
@@ -128,7 +128,7 @@ Running `chargeplan status` displays high-precision hardware diagnostics:
 
 ## 🛠️ Configuration
 
-Configuration is automatically stored at `/etc/chargeplan.json` (or `~/.config/chargeplan/config.json`):
+Configuration is stored at `/etc/chargeplan.json` (or `~/.config/chargeplan/config.json`):
 
 ```json
 {
@@ -145,23 +145,23 @@ Configuration is automatically stored at `/etc/chargeplan.json` (or `~/.config/c
 
 ## macOS 27 (Golden Gate) Notes
 
-On macOS 27 (and the firmware that ships with certain 26.x / 15.x security updates), Apple gated the classic SMC charge-inhibit keys (`CHTE`, `CH0B`, `CH0C`, and the newer `bfD0`/`bfE0`/`bfF0` set) behind the private entitlement `com.apple.private.iokit.soc-limit`. Even root cannot write them.
+On macOS 27 (and firmware shipping with recent security updates), Apple gated legacy SMC charge-inhibit keys behind private entitlements. 
 
-ChargePlan automatically falls back to Apple’s own manual charge-limit mechanism inside `powerd`:
+ChargePlan automatically uses Apple’s native manual charge-limit mechanism inside `powerd`:
 
-- For limits ≥ 80% it uses the public PowerUI XPC path (the same one behind System Settings → Battery → Charge Limit).
-- For limits below 80% (e.g. 50%) it writes `mclLimitValue` into the `com.apple.smartcharging.topoffprotection` preference domain and posts `com.apple.smartcharging.defaultschanged`. The 80–100% range check exists only in the XPC handler; the preference-reload path forwards the value unvalidated. This engages a firmware SoC ceiling with true AC pass-through (~0 mA battery current) that holds through sleep.
+- For limits ≥ 80% it uses the public PowerUI XPC path (the same backend used by System Settings → Battery → Charge Limit).
+- For limits below 80% (e.g. 50%) it writes to `com.apple.smartcharging.topoffprotection` and notifies `powerd`. The 80–100% boundary check exists only in Apple's front-end UI; the system preference forwards the value to hardware directly. This engages a firmware SoC ceiling with true AC pass-through (~0 mA battery current) that holds through sleep.
 
-Once the battery reaches the target, the Mac runs entirely from the adapter. The closed-loop governor continues to re-assert the limit after sleep, lid events, or power renegotiation. Occasional Apple calibration charges to 100% can still occur; ChargePlan will restore the limit afterward.
+Once the battery reaches the target, the Mac runs entirely from the adapter. The governor continues to re-assert the limit after sleep, lid events, or power renegotiation.
 
-This path is undocumented and may change in a future macOS update. The hardware backend reported by `chargeplan status` will show **macOS Native PowerUI (AC Pass-Through)** when this mode is active.
+The hardware backend reported by `chargeplan status` displays **macOS Native PowerUI (AC Pass-Through)** when this mode is active.
 
 ---
 
 ## ⚠️ Disclaimer
 
 > [!CAUTION]
-> **Use at your own risk.** ChargePlan interfaces directly with low-level macOS power management, AppleSMC registers, and battery charging subsystems. While designed with safety boundaries and thermal fail-safes, **the developer is not responsible for any hardware damage, battery degradation, data loss, voided warranties, or system issues** resulting from the use of this software. This software is provided "as is", without warranty of any kind.
+> **Use at your own risk.** ChargePlan interfaces directly with low-level macOS power management and battery charging subsystems. While designed with safety boundaries and thermal fail-safes, **the developer is not responsible for any hardware damage, battery degradation, data loss, voided warranties, or system issues** resulting from the use of this software. This software is provided "as is", without warranty of any kind.
 
 ---
 
