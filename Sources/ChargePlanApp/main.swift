@@ -344,6 +344,22 @@ final class ChargePlanAppDelegate: NSObject, NSApplicationDelegate {
         driftRoot.submenu = driftMenu
         menu.addItem(driftRoot)
         
+        // Status Icon Legend Submenu
+        let legendMenu = NSMenu()
+        let legendItems = [
+            ("⚡", "Charging", "Cells actively accepting power to target"),
+            ("🔌", "AC Pass-Through", "Wall power idle hold (0.00W battery stress)"),
+            ("🔋", "On Battery", "Discharging, AC adapter disconnected")
+        ]
+        for (icon, title, desc) in legendItems {
+            let item = NSMenuItem(title: "\(icon)  \(title) — \(desc)", action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            legendMenu.addItem(item)
+        }
+        let legendRoot = NSMenuItem(title: "Status Icon Legend", action: nil, keyEquivalent: "")
+        legendRoot.submenu = legendMenu
+        menu.addItem(legendRoot)
+        
         menu.addItem(.separator())
         
         let openSettingsItem = NSMenuItem(title: "Open ChargePlan Settings & Installer…", action: #selector(showSettingsWindow), keyEquivalent: ",")
@@ -441,9 +457,16 @@ final class ChargePlanAppDelegate: NSObject, NSApplicationDelegate {
             graphBox.title = "Live Battery & Charge Float Timeline"
             content.addSubview(graphBox)
             
-            let gView = BatteryGraphView(frame: NSRect(x: 10, y: 8, width: 392, height: 86))
+            let gView = BatteryGraphView(frame: NSRect(x: 10, y: 24, width: 392, height: 70))
             graphBox.contentView?.addSubview(gView)
             self.batteryGraphView = gView
+            
+            let legendLabel = NSTextField(labelWithString: "Legend:  ⚡ Charging   •   🔌 AC Pass-Through (Wall Power)   •   🔋 On Battery")
+            legendLabel.font = NSFont.systemFont(ofSize: 10, weight: .regular)
+            legendLabel.textColor = .secondaryLabelColor
+            legendLabel.alignment = .center
+            legendLabel.frame = NSRect(x: 10, y: 4, width: 392, height: 16)
+            graphBox.contentView?.addSubview(legendLabel)
             
             let cfg = ConfigManager.shared.load()
             

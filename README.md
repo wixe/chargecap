@@ -111,18 +111,27 @@ Running `chargeplan status` displays high-precision hardware diagnostics:
 ========================================================================
 ⚡ CHARGEPLAN POWER TELEMETRY & GOVERNOR
 ========================================================================
-  Battery Level:      55% (🔌 AC Connected (Not Charging))
+  Battery Level:      55.12% (🔌 AC Connected (Not Charging))
   Target Limit:       50% (Drift -3%)
   Governor State:     Holding Cap at 50% (Idle AC Pass-through)
   Health Condition:   [██████████████████░░] 86.2%
   Cycle Count:        121 cycles
   Voltage & Current:  11389 mV  •  0 mA (0.00W)
-  Hardware Capacity:  3777 / 4382 mAh
+  Hardware Capacity:  2412 / 4370 / 4382 mAh
   Thermal State:      Nominal
   Hardware Backend:   macOS Native PowerUI (AC Pass-Through)
   Serial Number:      D862125AQVYPJYRA4
+  Icon Legend:        ⚡ Charging  •  🔌 AC Pass-Through (Hold)  •  🔋 On Battery
 ========================================================================
 ```
+
+### 🏷️ Status Icon Legend
+
+| Icon | Power State | Hardware Description |
+| :---: | :--- | :--- |
+| **⚡** | **Charging** | Battery cells are actively accepting power and charging towards configured limit |
+| **🔌** | **AC Pass-Through** | Wall power connected; cell charging inhibited (`0 mA`, `0.00W` battery stress) |
+| **🔋** | **On Battery** | Discharging on battery power; AC adapter disconnected |
 
 ---
 

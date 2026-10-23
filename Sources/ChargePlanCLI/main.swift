@@ -85,6 +85,7 @@ func handleStatus(jsonOutput: Bool) {
       Thermal State:      \(status.thermalState)
       Hardware Backend:   \(hw.modeName)
       Serial Number:      \(status.serialNumber)
+      Icon Legend:        ⚡ Charging  •  🔌 AC Pass-Through (Hold)  •  🔋 On Battery
     ========================================================================
     """)
     
