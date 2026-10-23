@@ -96,18 +96,26 @@ func handleStatus(jsonOutput: Bool) {
 }
 
 func handleSet(args: [String]) {
-    guard getuid() == 0 else {
-        print("❌ Power control requires root privileges. Please run with sudo:\n   sudo chargecap set \(args.first ?? "50")")
-        exit(1)
-    }
-    guard let first = args.first, let val = Int(first), val >= 30 && val <= 100 else {
-        print("❌ Error: Please specify a valid limit between 30 and 100 (e.g. 'sudo chargecap set 50')")
+    guard let first = args.first, let val = Int(first), (30...100).contains(val) else {
+        print("❌ Error: Please specify a valid limit between 30 and 100 (e.g. 'chargecap set 50')")
         exit(1)
     }
     
-    if let resp = UnixSocketClient.send("SET \(val)"), resp.contains("\"success\":true") {
-        print("✅ ChargeCap daemon updated via socket: target limit is now \(val)%.")
-        return
+    // 1. If background daemon is running, send command via socket (zero-sudo for console user / root)
+    if let resp = UnixSocketClient.send("SET \(val)") {
+        if resp.contains("\"success\":true") {
+            print("✅ ChargeCap daemon updated via socket: target limit is now \(val)%.")
+            return
+        } else if resp.contains("Permission denied") {
+            print("❌ Permission denied by daemon. Please run with sudo: sudo chargecap set \(val)")
+            exit(1)
+        }
+    }
+    
+    // 2. Direct modification requires root if daemon is not running
+    guard getuid() == 0 else {
+        print("❌ Power control requires root privileges (or start background daemon with 'sudo chargecap install'):\n   sudo chargecap set \(val)")
+        exit(1)
     }
     
     var cfg = ConfigManager.shared.load()
@@ -122,24 +130,32 @@ func handleSet(args: [String]) {
 }
 
 func handleDeadband(args: [String]) {
-    guard getuid() == 0 else {
-        print("❌ Power control requires root privileges. Please run with sudo:\n   sudo chargecap deadband \(args.joined(separator: " "))")
-        exit(1)
-    }
     guard let first = args.first?.lowercased() else {
-        print("❌ Usage: sudo chargecap deadband <on|off> [delta_percent]")
+        print("❌ Usage: chargecap deadband <on|off> [delta_percent]")
         exit(1)
     }
     
     let enabled = (first == "on" || first == "true" || first == "1")
     var delta = 3
-    if args.count > 1, let d = Int(args[1]), d >= 1 && d <= 10 {
+    if args.count > 1, let d = Int(args[1]), (1...10).contains(d) {
         delta = d
     }
     
-    if let resp = UnixSocketClient.send("DEADBAND \(enabled ? "on" : "off") \(delta)"), resp.contains("\"success\":true") {
-        print("✅ Hysteresis deadband updated via socket: \(enabled ? "ENABLED (-\(delta)%)" : "DISABLED")")
-        return
+    // 1. If background daemon is running, send command via socket (zero-sudo for console user / root)
+    if let resp = UnixSocketClient.send("DEADBAND \(enabled ? "on" : "off") \(delta)") {
+        if resp.contains("\"success\":true") {
+            print("✅ Hysteresis deadband updated via socket: \(enabled ? "ENABLED (-\(delta)%)" : "DISABLED")")
+            return
+        } else if resp.contains("Permission denied") {
+            print("❌ Permission denied by daemon. Please run with sudo: sudo chargecap deadband \(args.joined(separator: " "))")
+            exit(1)
+        }
+    }
+    
+    // 2. Direct modification requires root if daemon is not running
+    guard getuid() == 0 else {
+        print("❌ Power control requires root privileges (or start background daemon with 'sudo chargecap install'):\n   sudo chargecap deadband \(args.joined(separator: " "))")
+        exit(1)
     }
     
     var cfg = ConfigManager.shared.load()
@@ -324,6 +340,11 @@ func handleUninstall() {
         print("❌ Uninstallation requires root privileges. Please run:\n   sudo chargecap uninstall")
         exit(1)
     }
+    
+    // Restore normal charging before removing daemon
+    let hw = HardwareBackend()
+    _ = hw.setChargingInhibited(false)
+    _ = hw.setChargeLimitPercentage(100)
     
     for label in ["com.wixe.chargecap.daemon", "com.wixe.chargecap"] {
         let bootout = Process()

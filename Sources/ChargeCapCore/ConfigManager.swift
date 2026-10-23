@@ -44,6 +44,9 @@ public class ConfigManager {
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let data = try encoder.encode(config)
             try data.write(to: url, options: .atomic)
+            if path == systemConfigPath {
+                chmod(systemConfigPath, 0o644)
+            }
             return true
         } catch {
             return false

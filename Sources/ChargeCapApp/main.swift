@@ -504,6 +504,12 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
     
     @objc private func selectDeadbandOption(_ sender: NSMenuItem) {
         let delta = sender.tag
+        let cmd = delta > 0 ? "DEADBAND on \(delta)" : "DEADBAND off"
+        if let resp = UnixSocketClient.send(cmd), resp.contains("\"success\":true") {
+            rebuildMenu()
+            refreshSettingsWindow()
+            return
+        }
         if delta > 0 {
             runPrivilegedCLI("deadband on \(delta)")
         } else {
@@ -515,12 +521,23 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
     
     @objc private func toggleDeadbandCheckbox(_ sender: NSButton) {
         let on = (sender.state == .on)
-        runPrivilegedCLI("deadband \(on ? "on 3" : "off")")
+        let cmd = "DEADBAND \(on ? "on 3" : "off")"
+        if let resp = UnixSocketClient.send(cmd), resp.contains("\"success\":true") {
+            rebuildMenu()
+            refreshSettingsWindow()
+            return
+        }
+        runPrivilegedCLI(cmd.lowercased())
         rebuildMenu()
         refreshSettingsWindow()
     }
     
     private func applyLimitWithAdminPrompt(_ limit: Int) {
+        if let resp = UnixSocketClient.send("SET \(limit)"), resp.contains("\"success\":true") {
+            rebuildMenu()
+            refreshSettingsWindow()
+            return
+        }
         runPrivilegedCLI("set \(limit)")
         rebuildMenu()
         refreshSettingsWindow()

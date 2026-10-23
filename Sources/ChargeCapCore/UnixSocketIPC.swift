@@ -102,6 +102,7 @@ public final class UnixSocketServer {
         var euid: uid_t = 65534
         var egid: gid_t = 65534
         let credOK = (getpeereid(clientFD, &euid, &egid) == 0)
+        let isAuthorized = credOK && isPeerAuthorized(euid: euid, egid: egid)
         
         var buffer = [UInt8](repeating: 0, count: 512)
         let bytesRead = read(clientFD, &buffer, buffer.count - 1)
@@ -113,13 +114,32 @@ public final class UnixSocketServer {
             request = "STATUS"
         }
         
-        let response = processCommand(request, isRootPeer: credOK && euid == 0)
+        let response = processCommand(request, isAuthorized: isAuthorized)
         _ = response.withCString { cStr in
             write(clientFD, cStr, strlen(cStr))
         }
     }
     
-    private func processCommand(_ commandLine: String, isRootPeer: Bool) -> String {
+    private func isPeerAuthorized(euid: uid_t, egid: gid_t) -> Bool {
+        if euid == 0 { return true }
+        var statBuf = stat()
+        if stat("/dev/console", &statBuf) == 0 && statBuf.st_uid == euid {
+            return true
+        }
+        if egid == 80 { return true }
+        if let pwd = getpwuid(euid) {
+            var numGroups: Int32 = 64
+            var groups = [Int32](repeating: 0, count: 64)
+            if getgrouplist(pwd.pointee.pw_name, Int32(pwd.pointee.pw_gid), &groups, &numGroups) == 0 {
+                if groups.prefix(Int(numGroups)).contains(80) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+    
+    private func processCommand(_ commandLine: String, isAuthorized: Bool) -> String {
         guard let governor = governor else {
             return "{\"error\":\"Governor unavailable\"}\n"
         }
@@ -137,8 +157,8 @@ public final class UnixSocketServer {
             return "{\"error\":\"Serialization failed\"}\n"
             
         case "SET":
-            guard isRootPeer else {
-                return "{\"error\":\"Permission denied: root (sudo) privileges required to control power\"}\n"
+            guard isAuthorized else {
+                return "{\"error\":\"Permission denied: console user, admin, or root (sudo) privileges required to control power\"}\n"
             }
             guard parts.count >= 2, let limit = Int(parts[1]), (30...100).contains(limit) else {
                 return "{\"error\":\"Invalid limit: must be 30-100\"}\n"
@@ -149,8 +169,8 @@ public final class UnixSocketServer {
             return "{\"success\":true,\"target_limit\":\(limit)}\n"
             
         case "DEADBAND":
-            guard isRootPeer else {
-                return "{\"error\":\"Permission denied: root (sudo) privileges required to control power\"}\n"
+            guard isAuthorized else {
+                return "{\"error\":\"Permission denied: console user, admin, or root (sudo) privileges required to control power\"}\n"
             }
             guard parts.count >= 2 else {
                 return "{\"error\":\"Usage: DEADBAND <on|off> [delta]\"}\n"
@@ -172,9 +192,9 @@ public final class UnixSocketServer {
                 sourcePath = parts[1]
             }
             
-            // Security verification: source must reside inside /Applications/ or caller must be root
-            if !isRootPeer && !sourcePath.hasPrefix("/Applications/") {
-                return "{\"error\":\"Permission denied: source binary must be inside /Applications/ or caller must be root\"}\n"
+            // Security verification: source must reside inside /Applications/ or caller must be authorized
+            if !isAuthorized && !sourcePath.hasPrefix("/Applications/") {
+                return "{\"error\":\"Permission denied: source binary must be inside /Applications/ or caller must be authorized\"}\n"
             }
             
             guard FileManager.default.isExecutableFile(atPath: sourcePath) else {
@@ -228,6 +248,9 @@ public final class UnixSocketServer {
             return "{\"success\":true,\"message\":\"ChargeCapDaemon & CLI updated. Restarting via launchd...\"}\n"
             
         case "INSTALL_APP":
+            guard isAuthorized else {
+                return "{\"error\":\"Permission denied: console user, admin, or root (sudo) privileges required to install app\"}\n"
+            }
             guard parts.count >= 2 else {
                 return "{\"error\":\"Usage: INSTALL_APP <source_app_path>\"}\n"
             }
