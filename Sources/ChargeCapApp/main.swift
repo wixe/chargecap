@@ -75,16 +75,17 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
     
-    private func fetchDaemonStatus() -> (running: Bool, mode: String, backend: String?) {
+    private func fetchDaemonStatus() -> (running: Bool, mode: String, backend: String?, version: String?) {
         if let liveJson = UnixSocketClient.send("STATUS"),
            let data = liveJson.data(using: .utf8),
            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let gov = obj["governor"] as? [String: Any],
            let mode = gov["mode"] as? String {
             let backend = gov["backend"] as? String
-            return (true, mode, backend)
+            let version = gov["version"] as? String
+            return (true, mode, backend, version)
         }
-        return (false, "Daemon Not Installed", nil)
+        return (false, "Daemon Not Installed", nil, nil)
     }
     
     private func rebuildMenu() {
@@ -191,10 +192,17 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
             let installItem = NSMenuItem(title: "⚠️ Enable Background Governor Daemon…", action: #selector(installDaemonAction), keyEquivalent: "")
             installItem.target = self
             menu.addItem(installItem)
-        } else {
-            let updateItem = NSMenuItem(title: "Update / Restart Background Daemon…", action: #selector(installDaemonAction), keyEquivalent: "")
+        } else if !isDaemonBinaryUpToDate(runningDaemonVersion: daemonInfo.version) {
+            let updateItem = NSMenuItem(title: "⚠️ Update Background Daemon…", action: #selector(installDaemonAction), keyEquivalent: "")
             updateItem.target = self
             menu.addItem(updateItem)
+            let uninstallItem = NSMenuItem(title: "Uninstall Background Daemon…", action: #selector(uninstallDaemonAction), keyEquivalent: "")
+            uninstallItem.target = self
+            menu.addItem(uninstallItem)
+        } else {
+            let restartItem = NSMenuItem(title: "Restart Background Daemon", action: #selector(installDaemonAction), keyEquivalent: "")
+            restartItem.target = self
+            menu.addItem(restartItem)
             let uninstallItem = NSMenuItem(title: "Uninstall Background Daemon…", action: #selector(uninstallDaemonAction), keyEquivalent: "")
             uninstallItem.target = self
             menu.addItem(uninstallItem)
@@ -347,17 +355,37 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
         settingsWindow?.makeKeyAndOrderFront(nil)
     }
     
-    private func isDaemonBinaryUpToDate() -> Bool {
-        guard let resPath = Bundle.main.resourcePath else { return true }
-        let bundled = "\(resPath)/chargecap"
+    private func isDaemonBinaryUpToDate(runningDaemonVersion: String? = nil) -> Bool {
+        if let runningVer = runningDaemonVersion {
+            return UpdateChecker.compareVersion(runningVer, ChargeCapVersion) != .orderedAscending
+        }
+        
         let installed = FileManager.default.fileExists(atPath: "/Library/Application Support/ChargeCap/ChargeCapDaemon")
             ? "/Library/Application Support/ChargeCap/ChargeCapDaemon"
             : "/usr/local/bin/chargecap"
-        guard FileManager.default.isExecutableFile(atPath: bundled),
-              FileManager.default.isExecutableFile(atPath: installed) else {
+        guard FileManager.default.isExecutableFile(atPath: installed) else {
             return false
         }
-        return FileManager.default.contentsEqual(atPath: bundled, andPath: installed)
+        
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: installed)
+        proc.arguments = ["version"]
+        let pipe = Pipe()
+        proc.standardOutput = pipe
+        do {
+            try proc.run()
+            proc.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            if let str = String(data: data, encoding: .utf8) {
+                let parts = str.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: " ")
+                if let ver = parts.last {
+                    return UpdateChecker.compareVersion(ver, ChargeCapVersion) != .orderedAscending
+                }
+            }
+        } catch {
+            return false
+        }
+        return false
     }
     
     private func refreshSettingsWindow() {
@@ -366,18 +394,21 @@ final class ChargeCapAppDelegate: NSObject, NSApplicationDelegate {
         let cfg = ConfigManager.shared.load()
         let daemonInfo = fetchDaemonStatus()
         let daemonActive = daemonInfo.running
-        let upToDate = isDaemonBinaryUpToDate()
+        let upToDate = isDaemonBinaryUpToDate(runningDaemonVersion: daemonInfo.version)
         let govMode = daemonInfo.mode
         
         if daemonActive && upToDate {
             daemonBadgeLabel?.stringValue = "✅ Background Daemon Active & Up-to-Date (/var/run/chargecap.sock)"
             daemonBadgeLabel?.textColor = .systemGreen
+            installDaemonButton?.title = "Reinstall / Restart Daemon"
         } else if daemonActive && !upToDate {
-            daemonBadgeLabel?.stringValue = "⚠️ Daemon Update Available — Click 'Install / Update Background Daemon' below"
+            daemonBadgeLabel?.stringValue = "⚠️ Daemon Update Available — Click 'Update Background Daemon' below"
             daemonBadgeLabel?.textColor = .systemOrange
+            installDaemonButton?.title = "Update Background Daemon"
         } else {
-            daemonBadgeLabel?.stringValue = "⚠️ Background Daemon Not Running — Click 'Install / Update Background Daemon' below"
+            daemonBadgeLabel?.stringValue = "⚠️ Background Daemon Not Running — Click 'Install Background Daemon' below"
             daemonBadgeLabel?.textColor = .systemOrange
+            installDaemonButton?.title = "Install Background Daemon"
         }
         
         let stateStr = status.isCharging ? "⚡ Charging" : (status.isACConnected ? "🔌 AC Connected (Not Charging)" : "🔋 On Battery")

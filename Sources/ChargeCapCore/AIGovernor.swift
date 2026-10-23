@@ -150,6 +150,7 @@ public class AIGovernor {
                 "serial_number": batt.serialNumber
             ],
             "governor": [
+                "version": ChargeCapVersion,
                 "target_limit": config.targetLimit,
                 "deadband_enabled": config.deadbandEnabled,
                 "deadband_delta": config.deadbandDelta,
