@@ -227,8 +227,106 @@ public final class UnixSocketServer {
             
             return "{\"success\":true,\"message\":\"ChargeCapDaemon & CLI updated. Restarting via launchd...\"}\n"
             
+        case "INSTALL_APP":
+            guard parts.count >= 2 else {
+                return "{\"error\":\"Usage: INSTALL_APP <source_app_path>\"}\n"
+            }
+            let sourceApp = parts.dropFirst().joined(separator: " ")
+            guard FileManager.default.fileExists(atPath: sourceApp) && sourceApp.hasSuffix(".app") else {
+                return "{\"error\":\"Invalid source app path: \(sourceApp)\"}\n"
+            }
+            let destApp = "/Applications/ChargeCap.app"
+            let trashOld = "/tmp/ChargeCap-old-\(UUID().uuidString).app"
+            
+            // Move aside existing app
+            if FileManager.default.fileExists(atPath: destApp) {
+                let mvOld = Process()
+                mvOld.executableURL = URL(fileURLWithPath: "/bin/mv")
+                mvOld.arguments = [destApp, trashOld]
+                try? mvOld.run()
+                mvOld.waitUntilExit()
+            }
+            
+            let cpProc = Process()
+            cpProc.executableURL = URL(fileURLWithPath: "/bin/cp")
+            cpProc.arguments = ["-R", sourceApp, destApp]
+            try? cpProc.run()
+            cpProc.waitUntilExit()
+            
+            _ = try? FileManager.default.removeItem(atPath: trashOld)
+            
+            // Fix ownership to the active console user so they own the app bundle
+            let whoProc = Process()
+            whoProc.executableURL = URL(fileURLWithPath: "/usr/bin/stat")
+            whoProc.arguments = ["-f", "%Su", "/dev/console"]
+            let whoPipe = Pipe()
+            whoProc.standardOutput = whoPipe
+            try? whoProc.run()
+            whoProc.waitUntilExit()
+            let whoData = whoPipe.fileHandleForReading.readDataToEndOfFile()
+            let consoleUser = String(data: whoData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !consoleUser.isEmpty && consoleUser != "root" {
+                let chownProc = Process()
+                chownProc.executableURL = URL(fileURLWithPath: "/usr/sbin/chown")
+                chownProc.arguments = ["-R", "\(consoleUser):admin", destApp]
+                try? chownProc.run()
+                chownProc.waitUntilExit()
+            }
+            
+            let xattr = Process()
+            xattr.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")
+            xattr.arguments = ["-cr", destApp]
+            try? xattr.run()
+            xattr.waitUntilExit()
+            
+            let cs = Process()
+            cs.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+            cs.arguments = ["--force", "--deep", "--sign", "-", destApp]
+            try? cs.run()
+            cs.waitUntilExit()
+            
+            // Also install the bundled CLI and daemon binaries atomically
+            let bundledCLI = "\(destApp)/Contents/Resources/chargecap"
+            if FileManager.default.isExecutableFile(atPath: bundledCLI) {
+                let daemonDir = "/Library/Application Support/ChargeCap"
+                let daemonBin = "\(daemonDir)/ChargeCapDaemon"
+                let cliBin = "/usr/local/bin/chargecap"
+                
+                let p1 = Process()
+                p1.executableURL = URL(fileURLWithPath: "/usr/bin/install")
+                p1.arguments = ["-m", "755", bundledCLI, daemonBin]
+                try? p1.run()
+                p1.waitUntilExit()
+                
+                let p2 = Process()
+                p2.executableURL = URL(fileURLWithPath: "/usr/bin/install")
+                p2.arguments = ["-m", "755", bundledCLI, cliBin]
+                try? p2.run()
+                p2.waitUntilExit()
+                
+                for path in [daemonBin, cliBin] {
+                    let xa = Process()
+                    xa.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")
+                    xa.arguments = ["-cr", path]
+                    try? xa.run()
+                    xa.waitUntilExit()
+                    
+                    let sgn = Process()
+                    sgn.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+                    sgn.arguments = ["--force", "--sign", "-", path]
+                    try? sgn.run()
+                    sgn.waitUntilExit()
+                }
+                
+                DispatchQueue.global().asyncAfter(deadline: .now() + 0.15) {
+                    exit(0)
+                }
+            }
+            
+            return "{\"success\":true,\"message\":\"ChargeCap.app and daemon updated successfully.\"}\n"
+            
         default:
-            return "{\"error\":\"Unknown command. Supported: STATUS, SET <30-100>, DEADBAND <on|off> [1-10], UPGRADE [path]\"}\n"
+            return "{\"error\":\"Unknown command. Supported: STATUS, SET <30-100>, DEADBAND <on|off> [1-10], UPGRADE [path], INSTALL_APP <path>\"}\n"
         }
     }
 }

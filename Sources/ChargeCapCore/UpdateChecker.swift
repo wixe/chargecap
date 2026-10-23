@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(AppKit)
+import AppKit
+#endif
 
 public let ChargeCapVersion = "0.3.1"
 
@@ -283,45 +286,104 @@ public final class UpdateChecker {
         progressHandler("Installing /Applications/ChargeCap.app…")
         let destApp = URL(fileURLWithPath: "/Applications/ChargeCap.app")
         
-        // Remove existing app bundle if present
+        var installedViaDaemon = false
+        var installSuccess = false
+        var installErrorMsg = ""
+        
+        // Tier 1: Try user-level atomic move aside and copy
+        let trashOld = URL(fileURLWithPath: "/tmp/ChargeCap-old-\(UUID().uuidString).app")
+        var movedAside = false
         if FileManager.default.fileExists(atPath: destApp.path) {
-            try? FileManager.default.removeItem(at: destApp)
+            do {
+                try FileManager.default.moveItem(at: destApp, to: trashOld)
+                movedAside = true
+            } catch {
+                movedAside = false
+            }
+        } else {
+            movedAside = true
         }
         
-        // Copy new app bundle
-        let copyResult = runProcess("/bin/cp", ["-R", sourceApp.path, destApp.path])
-        guard copyResult.exitCode == 0 else {
-            throw UpdateError.copyFailed(copyResult.output)
+        if movedAside {
+            let copyResult = runProcess("/bin/cp", ["-R", sourceApp.path, destApp.path])
+            if copyResult.exitCode == 0 {
+                installSuccess = true
+                _ = try? FileManager.default.removeItem(at: trashOld)
+            } else {
+                installErrorMsg = copyResult.output
+                // Restore original app if copy failed
+                if FileManager.default.fileExists(atPath: trashOld.path) {
+                    _ = try? FileManager.default.moveItem(at: trashOld, to: destApp)
+                }
+            }
         }
         
-        // Strip quarantine and re-sign ad-hoc
+        // Tier 2: If Tier 1 failed (e.g. root-owned bundle or permission denied), ask the root daemon
+        if !installSuccess {
+            progressHandler("Requesting root daemon to install /Applications/ChargeCap.app…")
+            if let resp = UnixSocketClient.send("INSTALL_APP \(sourceApp.path)"), resp.contains("\"success\":true") {
+                installSuccess = true
+                installedViaDaemon = true
+            } else {
+                if installErrorMsg.isEmpty {
+                    installErrorMsg = "Daemon IPC installation unsuccessful."
+                }
+            }
+        }
+        
+        // Tier 3: If root daemon was not running or failed, fall back to AppleScript with administrator privileges
+        if !installSuccess {
+            progressHandler("Requesting administrator approval to install /Applications/ChargeCap.app…")
+            let adminScript = """
+            do shell script "rm -rf '/Applications/ChargeCap.app' && cp -R '\(sourceApp.path)' '/Applications/ChargeCap.app' && chown -R $USER:admin '/Applications/ChargeCap.app' && xattr -cr '/Applications/ChargeCap.app' && codesign --force --deep --sign - '/Applications/ChargeCap.app'" with administrator privileges
+            """
+            var scriptError: NSDictionary?
+            #if canImport(AppKit)
+            if let appleScript = NSAppleScript(source: adminScript) {
+                _ = appleScript.executeAndReturnError(&scriptError)
+                if scriptError == nil {
+                    installSuccess = true
+                } else if let msg = scriptError?["NSAppleScriptErrorMessage"] as? String {
+                    installErrorMsg = msg
+                }
+            }
+            #endif
+        }
+        
+        guard installSuccess else {
+            throw UpdateError.copyFailed(installErrorMsg)
+        }
+        
+        // Ensure quarantine flags are cleared and ad-hoc signed
         _ = runProcess("/usr/bin/xattr", ["-cr", destApp.path])
         _ = runProcess("/usr/bin/codesign", ["--force", "--deep", "--sign", "-", destApp.path])
         
         // Detach volume
         _ = runProcess("/usr/bin/hdiutil", ["detach", mountDir.path, "-quiet"])
         
-        // Automatically sync background daemon and CLI binaries with the newly installed app
-        let bundledCLI = destApp.appendingPathComponent("Contents/Resources/chargecap").path
-        if FileManager.default.isExecutableFile(atPath: bundledCLI) {
-            progressHandler("Automatically updating background daemon & CLI…")
-            // 1. If daemon is running, trigger seamless zero-password socket UPGRADE
-            if let resp = UnixSocketClient.send("UPGRADE \(bundledCLI)"), resp.contains("\"success\":true") {
-                progressHandler("Background daemon updated and restarted.")
-            } else if getuid() == 0 {
-                // 2. If running as root (e.g. CLI update), copy directly
-                let daemonDir = "/Library/Application Support/ChargeCap"
-                let daemonBin = "\(daemonDir)/ChargeCapDaemon"
-                let cliBin = "/usr/local/bin/chargecap"
-                try? FileManager.default.createDirectory(atPath: daemonDir, withIntermediateDirectories: true)
-                try? FileManager.default.createDirectory(atPath: "/usr/local/bin", withIntermediateDirectories: true)
-                _ = runProcess("/usr/bin/install", ["-m", "755", bundledCLI, daemonBin])
-                _ = runProcess("/usr/bin/install", ["-m", "755", bundledCLI, cliBin])
-                _ = runProcess("/usr/bin/xattr", ["-cr", daemonBin])
-                _ = runProcess("/usr/bin/xattr", ["-cr", cliBin])
-                _ = runProcess("/usr/bin/codesign", ["--force", "--sign", "-", daemonBin])
-                _ = runProcess("/usr/bin/codesign", ["--force", "--sign", "-", cliBin])
-                _ = runProcess("/bin/launchctl", ["kickstart", "-k", "system/com.wixe.chargecap.daemon"])
+        // Automatically sync background daemon and CLI binaries if not already done by daemon INSTALL_APP
+        if !installedViaDaemon {
+            let bundledCLI = destApp.appendingPathComponent("Contents/Resources/chargecap").path
+            if FileManager.default.isExecutableFile(atPath: bundledCLI) {
+                progressHandler("Automatically updating background daemon & CLI…")
+                // 1. If daemon is running, trigger seamless zero-password socket UPGRADE
+                if let resp = UnixSocketClient.send("UPGRADE \(bundledCLI)"), resp.contains("\"success\":true") {
+                    progressHandler("Background daemon updated and restarted.")
+                } else if getuid() == 0 {
+                    // 2. If running as root (e.g. CLI update), copy directly
+                    let daemonDir = "/Library/Application Support/ChargeCap"
+                    let daemonBin = "\(daemonDir)/ChargeCapDaemon"
+                    let cliBin = "/usr/local/bin/chargecap"
+                    try? FileManager.default.createDirectory(atPath: daemonDir, withIntermediateDirectories: true)
+                    try? FileManager.default.createDirectory(atPath: "/usr/local/bin", withIntermediateDirectories: true)
+                    _ = runProcess("/usr/bin/install", ["-m", "755", bundledCLI, daemonBin])
+                    _ = runProcess("/usr/bin/install", ["-m", "755", bundledCLI, cliBin])
+                    _ = runProcess("/usr/bin/xattr", ["-cr", daemonBin])
+                    _ = runProcess("/usr/bin/xattr", ["-cr", cliBin])
+                    _ = runProcess("/usr/bin/codesign", ["--force", "--sign", "-", daemonBin])
+                    _ = runProcess("/usr/bin/codesign", ["--force", "--sign", "-", cliBin])
+                    _ = runProcess("/bin/launchctl", ["kickstart", "-k", "system/com.wixe.chargecap.daemon"])
+                }
             }
         }
         

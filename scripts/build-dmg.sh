@@ -86,9 +86,13 @@ hdiutil create \
     -format UDZO \
     "$DMG_PATH"
 
-# Copy ChargeCap.app into /Applications on this Mac as well
-rm -rf /Applications/ChargeCap.app
-cp -R "$APP_BUNDLE" /Applications/ChargeCap.app
+# Safely copy ChargeCap.app into /Applications on this Mac as well
+if [[ -w "/Applications" ]]; then
+    TRASH_OLD="/tmp/ChargeCap-build-old-$RANDOM.app"
+    mv /Applications/ChargeCap.app "$TRASH_OLD" 2>/dev/null || true
+    cp -R "$APP_BUNDLE" /Applications/ChargeCap.app 2>/dev/null || true
+    rm -rf "$TRASH_OLD" 2>/dev/null || true
+fi
 
 rm -rf "$BUILD_SCRATCH" "$STAGING_DIR"
 

@@ -73,6 +73,12 @@ if hdiutil attach "$DMG_PATH" -mountpoint "$MOUNT_DIR" -nobrowse -quiet; then
     rm -rf "/Applications/ChargeCap.app"
     cp -R "$MOUNT_DIR/ChargeCap.app" "/Applications/ChargeCap.app"
     hdiutil detach "$MOUNT_DIR" -quiet || true
+    
+    CONSOLE_USER="$(stat -f '%Su' /dev/console 2>/dev/null || echo "${SUDO_USER:-}")"
+    if [[ -n "$CONSOLE_USER" && "$CONSOLE_USER" != "root" ]]; then
+        chown -R "$CONSOLE_USER:admin" "/Applications/ChargeCap.app" 2>/dev/null || true
+    fi
+    
     xattr -cr "/Applications/ChargeCap.app" 2>/dev/null || true
     codesign --force --deep --sign - "/Applications/ChargeCap.app" 2>/dev/null || true
 fi
