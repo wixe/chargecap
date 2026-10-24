@@ -3,7 +3,7 @@ import Foundation
 import AppKit
 #endif
 
-public let ChargePlanVersion = "0.4.2"
+public let ChargePlanVersion = "0.4.3"
 public let ChargeCapVersion = ChargePlanVersion
 
 public struct ReleaseInfo: Codable, Equatable {

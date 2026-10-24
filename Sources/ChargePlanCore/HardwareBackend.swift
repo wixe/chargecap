@@ -2,7 +2,7 @@ import Foundation
 import ObjectiveC
 import OSLog
 
-public enum ChargingMode {
+public enum ChargingMode: Equatable {
     case directSMC
     case nativePowerUI
     case auxiliaryCLI(path: String)
@@ -294,7 +294,47 @@ public class HardwareBackend {
         return unsafeBitCast(method_getImplementation(method), to: SetFn.self)(client, setSel, target, &err)
     }
     
-    public func kickPowerUIRefresh() {
+    public func kickPowerUIRefresh(dwellSeconds: Double = 1.2) {
+        // Physical AC disconnection requires ~1.0-1.5 seconds for macOS powerd and the
+        // Battery Management Unit (BMU) debounce filters to register the power path change.
+        // An instantaneous kick does not allow the hardware filter to clear.
+        // We replicate this debounce window by:
+        // 1. Signaling powerd and PowerUIAgent of the transient power change
+        // 2. Dwelling for ~1.2s (matching physical AC unplug detection time)
+        // 3. Re-asserting the target limit and broadcasting smart charging refresh.
+        
+        if activeMode == .nativePowerUI {
+            _ = disablePowerUILimit()
+        } else {
+            _ = setChargingInhibited(false)
+        }
+        
+        if geteuid() == 0 {
+            let killProc = Process()
+            killProc.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
+            killProc.arguments = ["-HUP", "PowerUIAgent"]
+            try? killProc.run()
+            killProc.waitUntilExit()
+        }
+        
+        let powerdNotify = Process()
+        powerdNotify.executableURL = URL(fileURLWithPath: "/usr/bin/notifyutil")
+        powerdNotify.arguments = ["-p", "com.apple.system.powersources.source"]
+        try? powerdNotify.run()
+        powerdNotify.waitUntilExit()
+        
+        // Dwell matching the ~1-second physical AC unplug detection window
+        if dwellSeconds > 0 {
+            Thread.sleep(forTimeInterval: dwellSeconds)
+        }
+        
+        if activeMode == .nativePowerUI {
+            let target = nearestPowerUILimit(currentLimit)
+            _ = setDirectXPCMCLLimit(UInt8(target))
+        } else {
+            _ = setChargingInhibited(true)
+        }
+        
         triggerPowerUIRefresh()
     }
     
