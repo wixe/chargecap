@@ -28,6 +28,16 @@ public struct BatteryStatus: Codable {
         return maxV - minV
     }
     
+    /// Energy in the pack now, and the energy a full charge holds, both in watt-hours.
+    /// Estimated from charge (mAh) times the live pack voltage.
+    public var energyWattHours: (remaining: Double, total: Double)? {
+        guard voltageMV > 0, remainingCapacityMAh > 0, fullChargeCapacityMAh > 0 else { return nil }
+        let volts = Double(voltageMV) / 1000.0
+        let remaining = Double(remainingCapacityMAh) / 1000.0 * volts
+        let total = Double(fullChargeCapacityMAh) / 1000.0 * volts
+        return (remaining, total)
+    }
+    
     enum CodingKeys: String, CodingKey {
         case percent
         case exactPercent

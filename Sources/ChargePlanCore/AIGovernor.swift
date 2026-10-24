@@ -108,10 +108,10 @@ public class AIGovernor {
                 state.inDrift = true
                 state.lastActionTimestamp = Date()
                 state.lastActionReason = "Target reached (\(status.percent)% >= \(target)%). Inhibiting charge."
-                state.modeDescription = "Holding Cap at \(target)% (AC Pass-Through)"
+                state.modeDescription = "Holding Target at \(target)% (AC Pass-Through)"
                 if !success { state.consecutiveErrors += 1 }
             } else {
-                state.modeDescription = "Holding Cap at \(target)% (Idle AC Pass-Through)"
+                state.modeDescription = "Holding Target at \(target)% (Idle AC Pass-Through)"
             }
             return
         }
@@ -169,15 +169,15 @@ public class AIGovernor {
                 let liveText = enforced.map { "\($0)%" } ?? "not armed"
                 state.modeDescription = "Stopping charge at \(target)% (battery \(status.percent)%, \(status.amperageMA)mA, powerd \(liveText))"
             } else if status.amperageMA < -50 {
-                state.modeDescription = "Above \(target)% cap — discharging toward it (\(status.percent)%, \(status.amperageMA)mA)"
+                state.modeDescription = "Above \(target)% target — discharging toward it (\(status.percent)%, \(status.amperageMA)mA)"
             } else if status.amperageMA == 0 {
-                state.modeDescription = "Holding Cap at \(target)% (Idle AC Pass-Through)"
+                state.modeDescription = "Holding Target at \(target)% (Idle AC Pass-Through)"
             } else {
-                state.modeDescription = "Holding Cap at \(target)% (AC Pass-Through)"
+                state.modeDescription = "Holding Target at \(target)% (AC Pass-Through)"
             }
         } else if status.percent <= lowerBound && config.driftEnabled {
             state.inDrift = false
-            state.modeDescription = "Charging to Cap \(target)% — battery at \(status.percent)%"
+            state.modeDescription = "Charging to Target \(target)% — battery at \(status.percent)%"
         } else {
             let liveText = enforced.map { "powerd \($0)%" } ?? "powerd not armed"
             state.modeDescription = "SoC ceiling active at \(target)% (\(status.percent)%, \(liveText))"
