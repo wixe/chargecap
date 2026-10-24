@@ -4,13 +4,30 @@ import ChargePlanCore
 
 final class BatteryGraphView: NSView {
     struct Sample {
+        let timestamp: Date
         let percent: Double
         let targetLimit: Int
         let isCharging: Bool
     }
     
+    public enum YAxisMode: Int {
+        case full = 0    // 0% – 100%
+        case zoomed = 1  // Focused operating band
+    }
+    
+    public var yAxisMode: YAxisMode = .full {
+        didSet {
+            needsDisplay = true
+        }
+    }
+    
     private var samples: [Sample] = []
-    private let maxSamples = 60
+    
+    public var selectedRangeSeconds: Double = 1800.0 { // Default 30 minutes
+        didSet {
+            needsDisplay = true
+        }
+    }
     
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -22,17 +39,23 @@ final class BatteryGraphView: NSView {
         wantsLayer = true
     }
     
-    func addSample(percent: Double, targetLimit: Int, isCharging: Bool) {
-        if samples.isEmpty {
-            for _ in 0..<maxSamples {
-                samples.append(Sample(percent: percent, targetLimit: targetLimit, isCharging: isCharging))
-            }
-        } else {
-            samples.append(Sample(percent: percent, targetLimit: targetLimit, isCharging: isCharging))
-            if samples.count > maxSamples {
-                samples.removeFirst(samples.count - maxSamples)
-            }
+    func addSample(percent: Double, targetLimit: Int, isCharging: Bool, timestamp: Date = Date()) {
+        if let last = samples.last, timestamp.timeIntervalSince(last.timestamp) < 0.5 {
+            // In-place update to prevent duplicate samples within 0.5s
+            samples[samples.count - 1] = Sample(timestamp: timestamp, percent: percent, targetLimit: targetLimit, isCharging: isCharging)
+            needsDisplay = true
+            return
         }
+        
+        // Append actual recorded sample only — no artificial historical anchors
+        samples.append(Sample(timestamp: timestamp, percent: percent, targetLimit: targetLimit, isCharging: isCharging))
+        
+        // Retain up to 24 hours of rolling history (86,400s)
+        let cutoff = timestamp.addingTimeInterval(-86400)
+        if let idx = samples.firstIndex(where: { $0.timestamp >= cutoff }), idx > 0 {
+            samples.removeFirst(idx)
+        }
+        
         needsDisplay = true
     }
     
@@ -48,42 +71,108 @@ final class BatteryGraphView: NSView {
         bgPath.lineWidth = 1
         bgPath.stroke()
         
-        let padX: CGFloat = 8
-        let padBottom: CGFloat = 16
-        let padTop: CGFloat = 14
-        let plotW = rect.width - padX * 2
+        let padLeft: CGFloat = 36
+        let padRight: CGFloat = 12
+        let padBottom: CGFloat = 18
+        let padTop: CGFloat = 18
+        let plotW = rect.width - padLeft - padRight
         let plotH = rect.height - padBottom - padTop
         guard plotW > 10 && plotH > 10 else { return }
         
-        // Grid reference lines (50%, 100%)
-        let gridColor = NSColor.tertiaryLabelColor.withAlphaComponent(0.3)
+        let now = samples.last?.timestamp ?? Date()
+        let startTime = now.addingTimeInterval(-selectedRangeSeconds)
+        
+        // Visible samples within the selected time window
+        var visible = samples.filter { $0.timestamp >= startTime }
+        if let older = samples.last(where: { $0.timestamp < startTime }) {
+            visible.insert(Sample(timestamp: startTime, percent: older.percent, targetLimit: older.targetLimit, isCharging: older.isCharging), at: 0)
+        }
+        
+        // Compute Y-axis min, max, and grid step
+        let yMin: Double
+        let yMax: Double
+        let gridStep: Double
+        
+        switch yAxisMode {
+        case .full:
+            yMin = 0.0
+            yMax = 100.0
+            gridStep = 25.0
+        case .zoomed:
+            let cap = Double(samples.last?.targetLimit ?? 80)
+            let pcts = visible.map(\.percent)
+            let minPct = pcts.min() ?? cap
+            let maxPct = pcts.max() ?? cap
+            var lo = min(minPct, cap) - 3.0
+            var hi = max(maxPct, cap) + 3.0
+            if (hi - lo) < 15.0 {
+                let center = (lo + hi) / 2.0
+                lo = center - 7.5
+                hi = center + 7.5
+            }
+            if (hi - lo) > 35.0 {
+                gridStep = 10.0
+                yMin = max(0.0, floor(lo / 10.0) * 10.0)
+                yMax = min(100.0, ceil(hi / 10.0) * 10.0)
+            } else {
+                gridStep = 5.0
+                yMin = max(0.0, floor(lo / 5.0) * 5.0)
+                yMax = min(100.0, ceil(hi / 5.0) * 5.0)
+            }
+        }
+        let ySpan = max(1.0, yMax - yMin)
+        
+        // Grid reference lines & Left Y-axis labels
+        let gridColor = NSColor.tertiaryLabelColor.withAlphaComponent(0.35)
         let gridFont = NSFont.monospacedDigitSystemFont(ofSize: 8, weight: .regular)
         let textAttrs: [NSAttributedString.Key: Any] = [
             .font: gridFont,
             .foregroundColor: NSColor.secondaryLabelColor.withAlphaComponent(0.7)
         ]
         
-        for level in [50, 100] {
-            let y = padBottom + (CGFloat(level) / 100.0) * plotH
+        var curLevel = yMin
+        while curLevel <= yMax + 0.001 {
+            let y = padBottom + CGFloat((curLevel - yMin) / ySpan) * plotH
+            
             let gPath = NSBezierPath()
-            gPath.move(to: NSPoint(x: padX, y: y))
-            gPath.line(to: NSPoint(x: rect.width - padX, y: y))
+            gPath.move(to: NSPoint(x: padLeft, y: y))
+            gPath.line(to: NSPoint(x: rect.width - padRight, y: y))
             let dashes: [CGFloat] = [2, 4]
             gPath.setLineDash(dashes, count: 2, phase: 0)
             gridColor.setStroke()
             gPath.lineWidth = 0.5
             gPath.stroke()
             
-            let label = "\(level)%"
-            (label as NSString).draw(at: NSPoint(x: padX + 2, y: min(rect.height - 12, y - 4)), withAttributes: textAttrs)
+            let tick = NSBezierPath()
+            tick.move(to: NSPoint(x: padLeft - 3, y: y))
+            tick.line(to: NSPoint(x: padLeft, y: y))
+            gridColor.setStroke()
+            tick.lineWidth = 0.75
+            tick.stroke()
+            
+            let label = "\(Int(round(curLevel)))%"
+            let labelSize = (label as NSString).size(withAttributes: textAttrs)
+            let labelX = max(2, padLeft - labelSize.width - 5)
+            let labelY = max(2, min(rect.height - labelSize.height - 2, y - labelSize.height * 0.5))
+            (label as NSString).draw(at: NSPoint(x: labelX, y: labelY), withAttributes: textAttrs)
+            
+            curLevel += gridStep
         }
         
+        // Left Y-axis vertical ruler line
+        let yAxisLine = NSBezierPath()
+        yAxisLine.move(to: NSPoint(x: padLeft, y: padBottom))
+        yAxisLine.line(to: NSPoint(x: padLeft, y: padBottom + plotH))
+        gridColor.setStroke()
+        yAxisLine.lineWidth = 0.75
+        yAxisLine.stroke()
+        
         // Target Limit dashed line (Amber / Orange)
-        if let targetLimit = samples.last?.targetLimit, targetLimit > 0, targetLimit < 100 {
-            let targetY = padBottom + (CGFloat(targetLimit) / 100.0) * plotH
+        if let targetLimit = samples.last?.targetLimit, Double(targetLimit) >= yMin && Double(targetLimit) <= yMax {
+            let targetY = padBottom + CGFloat((Double(targetLimit) - yMin) / ySpan) * plotH
             let tPath = NSBezierPath()
-            tPath.move(to: NSPoint(x: padX, y: targetY))
-            tPath.line(to: NSPoint(x: rect.width - padX, y: targetY))
+            tPath.move(to: NSPoint(x: padLeft, y: targetY))
+            tPath.line(to: NSPoint(x: rect.width - padRight, y: targetY))
             let dashes: [CGFloat] = [4, 3]
             tPath.setLineDash(dashes, count: 2, phase: 0)
             NSColor.systemOrange.withAlphaComponent(0.75).setStroke()
@@ -96,48 +185,135 @@ final class BatteryGraphView: NSView {
                 .foregroundColor: NSColor.systemOrange
             ]
             let tagSize = (capTag as NSString).size(withAttributes: capAttrs)
-            (capTag as NSString).draw(at: NSPoint(x: rect.width - padX - tagSize.width - 2, y: min(rect.height - 12, targetY - 4)), withAttributes: capAttrs)
+            (capTag as NSString).draw(at: NSPoint(x: rect.width - padRight - tagSize.width - 2, y: min(rect.height - 12, targetY - 4)), withAttributes: capAttrs)
         }
         
-        guard samples.count >= 2 else { return }
+        // Time Axis Baseline & Ticks
+        let baseline = NSBezierPath()
+        baseline.move(to: NSPoint(x: padLeft, y: padBottom))
+        baseline.line(to: NSPoint(x: rect.width - padRight, y: padBottom))
+        gridColor.setStroke()
+        baseline.lineWidth = 0.75
+        baseline.stroke()
         
-        var points: [NSPoint] = []
-        for (i, s) in samples.enumerated() {
-            let x = padX + (CGFloat(i) / CGFloat(samples.count - 1)) * plotW
-            let clampedPct = max(0.0, min(100.0, s.percent))
-            let y = padBottom + (CGFloat(clampedPct) / 100.0) * plotH
-            points.append(NSPoint(x: x, y: y))
+        for frac: CGFloat in [0.0, 0.5, 1.0] {
+            let tickX = padLeft + frac * plotW
+            let tick = NSBezierPath()
+            tick.move(to: NSPoint(x: tickX, y: padBottom))
+            tick.line(to: NSPoint(x: tickX, y: padBottom - 3))
+            gridColor.setStroke()
+            tick.lineWidth = 0.75
+            tick.stroke()
+        }
+        
+        // Time Axis Labels
+        let timeFont = NSFont.monospacedDigitSystemFont(ofSize: 8, weight: .medium)
+        let timeAttrs: [NSAttributedString.Key: Any] = [
+            .font: timeFont,
+            .foregroundColor: NSColor.secondaryLabelColor.withAlphaComponent(0.8)
+        ]
+        
+        let leftLabel = "-30m"
+        let midLabel = "-15m"
+        let rightLabel = "Now"
+        
+        (leftLabel as NSString).draw(at: NSPoint(x: padLeft, y: 3), withAttributes: timeAttrs)
+        
+        let midSize = (midLabel as NSString).size(withAttributes: timeAttrs)
+        (midLabel as NSString).draw(at: NSPoint(x: padLeft + (plotW - midSize.width) * 0.5, y: 3), withAttributes: timeAttrs)
+        
+        let rightSize = (rightLabel as NSString).size(withAttributes: timeAttrs)
+        (rightLabel as NSString).draw(at: NSPoint(x: rect.width - padRight - rightSize.width, y: 3), withAttributes: timeAttrs)
+        
+        guard !samples.isEmpty else { return }
+        
+        // Group samples into continuous segments (break on gaps > 30s)
+        var segments: [[Sample]] = []
+        var currentSegment: [Sample] = []
+        let maxGapSeconds: Double = 30.0
+        
+        for s in visible {
+            if let lastS = currentSegment.last {
+                if s.timestamp.timeIntervalSince(lastS.timestamp) > maxGapSeconds {
+                    if !currentSegment.isEmpty {
+                        segments.append(currentSegment)
+                    }
+                    currentSegment = [s]
+                } else {
+                    currentSegment.append(s)
+                }
+            } else {
+                currentSegment.append(s)
+            }
+        }
+        if !currentSegment.isEmpty {
+            segments.append(currentSegment)
         }
         
         let isCharging = samples.last?.isCharging ?? false
         let baseColor = isCharging ? NSColor.systemGreen : NSColor.systemBlue
         
-        let fillPath = NSBezierPath()
-        fillPath.move(to: NSPoint(x: points[0].x, y: padBottom))
-        for pt in points {
-            fillPath.line(to: pt)
+        for seg in segments {
+            guard seg.count >= 2 else {
+                if let single = seg.first {
+                    let elapsed = single.timestamp.timeIntervalSince(startTime)
+                    let frac = max(0.0, min(1.0, elapsed / selectedRangeSeconds))
+                    let x = padLeft + CGFloat(frac) * plotW
+                    let clampedPct = max(yMin, min(yMax, single.percent))
+                    let y = padBottom + CGFloat((clampedPct - yMin) / ySpan) * plotH
+                    baseColor.setFill()
+                    let dot = NSBezierPath(ovalIn: NSRect(x: x - 2, y: y - 2, width: 4, height: 4))
+                    dot.fill()
+                }
+                continue
+            }
+            
+            var points: [NSPoint] = []
+            for s in seg {
+                let elapsed = s.timestamp.timeIntervalSince(startTime)
+                let frac = max(0.0, min(1.0, elapsed / selectedRangeSeconds))
+                let x = padLeft + CGFloat(frac) * plotW
+                let clampedPct = max(yMin, min(yMax, s.percent))
+                let y = padBottom + CGFloat((clampedPct - yMin) / ySpan) * plotH
+                points.append(NSPoint(x: x, y: y))
+            }
+            
+            guard points.count >= 2 else { continue }
+            
+            let fillPath = NSBezierPath()
+            fillPath.move(to: NSPoint(x: points[0].x, y: padBottom))
+            for pt in points {
+                fillPath.line(to: pt)
+            }
+            fillPath.line(to: NSPoint(x: points.last!.x, y: padBottom))
+            fillPath.close()
+            
+            ctx.saveGState()
+            fillPath.addClip()
+            let gradient = NSGradient(starting: baseColor.withAlphaComponent(0.28), ending: baseColor.withAlphaComponent(0.02))
+            gradient?.draw(in: rect, angle: 90)
+            ctx.restoreGState()
+            
+            let strokePath = NSBezierPath()
+            strokePath.move(to: points[0])
+            for pt in points.dropFirst() {
+                strokePath.line(to: pt)
+            }
+            baseColor.setStroke()
+            strokePath.lineWidth = 2.0
+            strokePath.lineCapStyle = .round
+            strokePath.lineJoinStyle = .round
+            strokePath.stroke()
         }
-        fillPath.line(to: NSPoint(x: points.last!.x, y: padBottom))
-        fillPath.close()
         
-        ctx.saveGState()
-        fillPath.addClip()
-        let gradient = NSGradient(starting: baseColor.withAlphaComponent(0.28), ending: baseColor.withAlphaComponent(0.02))
-        gradient?.draw(in: rect, angle: 90)
-        ctx.restoreGState()
-        
-        let strokePath = NSBezierPath()
-        strokePath.move(to: points[0])
-        for pt in points.dropFirst() {
-            strokePath.line(to: pt)
-        }
-        baseColor.setStroke()
-        strokePath.lineWidth = 2.0
-        strokePath.lineCapStyle = .round
-        strokePath.lineJoinStyle = .round
-        strokePath.stroke()
-        
-        if let lastPt = points.last, let lastSample = samples.last {
+        if let lastSample = samples.last {
+            let elapsed = lastSample.timestamp.timeIntervalSince(startTime)
+            let frac = max(0.0, min(1.0, elapsed / selectedRangeSeconds))
+            let lastX = padLeft + CGFloat(frac) * plotW
+            let clampedPct = max(yMin, min(yMax, lastSample.percent))
+            let lastY = padBottom + CGFloat((clampedPct - yMin) / ySpan) * plotH
+            let lastPt = NSPoint(x: lastX, y: lastY)
+            
             baseColor.withAlphaComponent(0.3).setFill()
             let glow = NSBezierPath(ovalIn: NSRect(x: lastPt.x - 5, y: lastPt.y - 5, width: 10, height: 10))
             glow.fill()
@@ -157,8 +333,8 @@ final class BatteryGraphView: NSView {
             if strY + strSize.height > rect.height - 2 {
                 strY = lastPt.y - strSize.height - 4
             }
-            if strX < padX {
-                strX = padX + 2
+            if strX < padLeft {
+                strX = padLeft + 2
             }
             (str as NSString).draw(at: NSPoint(x: strX, y: strY), withAttributes: badgeAttrs)
         }
@@ -166,17 +342,20 @@ final class BatteryGraphView: NSView {
 }
 
 @MainActor
-final class ChargePlanAppDelegate: NSObject, NSApplicationDelegate {
+final class ChargePlanAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var statusItem: NSStatusItem!
     private var refreshTimer: Timer?
+    private var windowTelemetryTimer: Timer?
     private var settingsWindow: NSWindow?
     
     // Settings window controls
     private var batteryLabel: NSTextField?
     private var governorLabel: NSTextField?
     private var telemetryLabel: NSTextField?
+    private var cellLabel: NSTextField?
     private var daemonBadgeLabel: NSTextField?
-    private var batteryGraphView: BatteryGraphView?
+    private let batteryGraphView = BatteryGraphView(frame: NSRect(x: 12, y: 12, width: 528, height: 132))
+    private var yScaleControl: NSSegmentedControl?
     private var limitSlider: NSSlider?
     private var limitValueLabel: NSTextField?
     private var driftCheckbox: NSButton?
@@ -235,7 +414,7 @@ final class ChargePlanAppDelegate: NSObject, NSApplicationDelegate {
             showSettingsWindow()
         }
         
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 4.0, repeats: true) { [weak self] _ in
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.autoSyncDaemonIfNeeded()
                 self?.rebuildMenu()
@@ -275,7 +454,7 @@ final class ChargePlanAppDelegate: NSObject, NSApplicationDelegate {
         
         let menu = NSMenu()
         
-        let titleItem = NSMenuItem(title: "⚡ ChargePlan Battery Governor", action: nil, keyEquivalent: "")
+        let titleItem = NSMenuItem(title: "⚡ ChargePlan Charge Controller", action: nil, keyEquivalent: "")
         titleItem.isEnabled = false
         menu.addItem(titleItem)
         
@@ -294,16 +473,24 @@ final class ChargePlanAppDelegate: NSObject, NSApplicationDelegate {
         let stateStr = status.isCharging ? "Charging" : (status.isACConnected ? "AC Pass-Through (On Hold)" : "On Battery")
         let wattageStr = String(format: "%.1fW", abs(status.wattageW))
         let pctFormatted = String(format: "%.2f%%", status.exactPercent)
-        batteryGraphView?.addSample(percent: status.exactPercent, targetLimit: cfg.targetLimit, isCharging: status.isCharging)
+        batteryGraphView.addSample(percent: status.exactPercent, targetLimit: cfg.targetLimit, isCharging: status.isCharging)
         
-        let infoLines = [
+        var infoLines = [
             "Battery: \(pctFormatted) (\(stateStr))",
             "Target Cap: \(cfg.targetLimit)% \(cfg.driftEnabled ? "(Drift -\(cfg.driftMargin)%)" : "(Strict)")",
-            "Governor: \(govMode)",
+            "Control Mode: \(govMode)",
             "Power: \(wattageStr) • \(status.voltageMV) mV • \(status.amperageMA) mA",
-            "Health: \(status.healthPercent)% (\(status.cycleCount) cycles) • \(status.thermalState)",
-            "Backend: \(backendName)"
+            "Health: \(status.healthPercent)% (\(status.cycleCount) cycles) • \(status.thermalState)"
         ]
+        if !status.cellVoltagesMV.isEmpty {
+            let cellsStr = status.cellVoltagesMV.map { String(format: "%.2fV", Double($0) / 1000.0) }.joined(separator: " • ")
+            let delta = status.cellImbalanceMV != nil ? " (Δ \(status.cellImbalanceMV!) mV)" : ""
+            let temp = status.temperatureC != nil ? String(format: " • %.1f°C", status.temperatureC!) : ""
+            infoLines.append("Cells: \(cellsStr)\(delta)\(temp)")
+        } else if let temp = status.temperatureC {
+            infoLines.append(String(format: "Battery Temp: %.1f°C", temp))
+        }
+        infoLines.append("Backend: \(backendName)")
         for line in infoLines {
             let item = NSMenuItem(title: "  " + line, action: nil, keyEquivalent: "")
             item.isEnabled = false
@@ -367,10 +554,6 @@ final class ChargePlanAppDelegate: NSObject, NSApplicationDelegate {
         
         menu.addItem(.separator())
         
-        let kickItem = NSMenuItem(title: "⚡ Manual Power Latch Kick", action: #selector(triggerManualKick), keyEquivalent: "")
-        kickItem.target = self
-        menu.addItem(kickItem)
-        
         let openSettingsItem = NSMenuItem(title: "Open ChargePlan Settings & Installer…", action: #selector(showSettingsWindow), keyEquivalent: ",")
         openSettingsItem.target = self
         menu.addItem(openSettingsItem)
@@ -385,7 +568,7 @@ final class ChargePlanAppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(loginItem)
         
         if !daemonActive {
-            let installItem = NSMenuItem(title: "⚠️ Enable Background Governor Daemon…", action: #selector(installDaemonAction), keyEquivalent: "")
+            let installItem = NSMenuItem(title: "⚠️ Enable Background Controller Daemon…", action: #selector(installDaemonAction), keyEquivalent: "")
             installItem.target = self
             menu.addItem(installItem)
         } else if !isDaemonBinaryUpToDate(runningDaemonVersion: daemonInfo.version) {
@@ -413,10 +596,14 @@ final class ChargePlanAppDelegate: NSObject, NSApplicationDelegate {
         statusItem.menu = menu
     }
     
+    @objc private func yAxisSegmentChanged(_ sender: NSSegmentedControl) {
+        batteryGraphView.yAxisMode = (sender.selectedSegment == 1) ? .zoomed : .full
+    }
+    
     @objc private func showSettingsWindow() {
         if settingsWindow == nil {
             let win = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 460, height: 585),
+                contentRect: NSRect(x: 0, y: 0, width: 600, height: 792),
                 styleMask: [.titled, .closable, .miniaturizable],
                 backing: .buffered,
                 defer: false
@@ -424,75 +611,146 @@ final class ChargePlanAppDelegate: NSObject, NSApplicationDelegate {
             win.title = "ChargePlan — Battery & Power Settings"
             win.center()
             win.isReleasedWhenClosed = false
+            win.delegate = self
             
             let content = NSView(frame: win.contentView!.bounds)
             win.contentView = content
             
-            let title = NSTextField(labelWithString: "⚡ ChargePlan Power Governor")
+            let title = NSTextField(labelWithString: "⚡ ChargePlan Charge Controller")
             title.font = NSFont.boldSystemFont(ofSize: 18)
-            title.frame = NSRect(x: 24, y: 538, width: 412, height: 26)
+            title.cell?.wraps = true
+            title.cell?.isScrollable = false
+            title.lineBreakMode = .byWordWrapping
+            title.frame = NSRect(x: 24, y: 750, width: 552, height: 30)
             content.addSubview(title)
             
             let daemonBadge = NSTextField(labelWithString: "")
             daemonBadge.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
-            daemonBadge.frame = NSRect(x: 24, y: 512, width: 412, height: 20)
+            daemonBadge.cell?.wraps = true
+            daemonBadge.cell?.isScrollable = false
+            daemonBadge.maximumNumberOfLines = 2
+            daemonBadge.lineBreakMode = .byWordWrapping
+            daemonBadge.frame = NSRect(x: 24, y: 720, width: 552, height: 24)
             content.addSubview(daemonBadge)
             self.daemonBadgeLabel = daemonBadge
             
-            let battBox = NSBox(frame: NSRect(x: 24, y: 416, width: 412, height: 90))
-            battBox.title = "Live Battery & Governor Telemetry"
+            let battBox = NSBox(frame: NSRect(x: 24, y: 582, width: 552, height: 126))
+            battBox.title = "Live Battery & Controller Telemetry"
             content.addSubview(battBox)
             
             let bLabel = NSTextField(labelWithString: "")
-            bLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 14, weight: .bold)
-            bLabel.frame = NSRect(x: 12, y: 46, width: 380, height: 22)
+            bLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .bold)
+            bLabel.cell?.wraps = true
+            bLabel.cell?.isScrollable = false
+            bLabel.maximumNumberOfLines = 2
+            bLabel.lineBreakMode = .byWordWrapping
+            bLabel.frame = NSRect(x: 12, y: 78, width: 528, height: 24)
             battBox.contentView?.addSubview(bLabel)
             self.batteryLabel = bLabel
             
             let gLabel = NSTextField(labelWithString: "")
             gLabel.font = NSFont.systemFont(ofSize: 12, weight: .regular)
-            gLabel.frame = NSRect(x: 12, y: 25, width: 380, height: 18)
+            gLabel.cell?.wraps = true
+            gLabel.cell?.isScrollable = false
+            gLabel.maximumNumberOfLines = 2
+            gLabel.lineBreakMode = .byWordWrapping
+            gLabel.frame = NSRect(x: 12, y: 54, width: 528, height: 24)
             battBox.contentView?.addSubview(gLabel)
             self.governorLabel = gLabel
             
             let tLabel = NSTextField(labelWithString: "")
             tLabel.font = NSFont.systemFont(ofSize: 11, weight: .regular)
             tLabel.textColor = .secondaryLabelColor
-            tLabel.frame = NSRect(x: 12, y: 5, width: 380, height: 18)
+            tLabel.cell?.wraps = true
+            tLabel.cell?.isScrollable = false
+            tLabel.maximumNumberOfLines = 2
+            tLabel.lineBreakMode = .byWordWrapping
+            tLabel.frame = NSRect(x: 12, y: 30, width: 528, height: 24)
             battBox.contentView?.addSubview(tLabel)
             self.telemetryLabel = tLabel
             
-            let graphBox = NSBox(frame: NSRect(x: 24, y: 290, width: 412, height: 118))
-            graphBox.title = "Live Battery & Charge Float Timeline"
+            let cLabel = NSTextField(labelWithString: "")
+            cLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+            cLabel.textColor = .secondaryLabelColor
+            cLabel.cell?.wraps = true
+            cLabel.cell?.isScrollable = false
+            cLabel.maximumNumberOfLines = 2
+            cLabel.lineBreakMode = .byWordWrapping
+            cLabel.frame = NSRect(x: 12, y: 6, width: 528, height: 24)
+            battBox.contentView?.addSubview(cLabel)
+            self.cellLabel = cLabel
+            
+            let graphBox = NSBox(frame: NSRect(x: 24, y: 384, width: 552, height: 186))
+            graphBox.title = "Live Battery & Charge Float Timeline (Rolling 30m)"
             content.addSubview(graphBox)
             
-            let gView = BatteryGraphView(frame: NSRect(x: 10, y: 24, width: 392, height: 70))
-            graphBox.contentView?.addSubview(gView)
-            self.batteryGraphView = gView
+            let yLabel = NSTextField(labelWithString: "Y-Scale:")
+            yLabel.font = NSFont.systemFont(ofSize: 10, weight: .medium)
+            yLabel.textColor = .secondaryLabelColor
+            yLabel.alignment = .right
+            yLabel.frame = NSRect(x: 348, y: 150, width: 66, height: 24)
+            graphBox.contentView?.addSubview(yLabel)
             
-            let legendLabel = NSTextField(labelWithString: "Legend:  ⚡ Charging   •   🔌 AC Pass-Through (Wall Power)   •   🔋 On Battery")
-            legendLabel.font = NSFont.systemFont(ofSize: 10, weight: .regular)
-            legendLabel.textColor = .secondaryLabelColor
-            legendLabel.alignment = .center
-            legendLabel.frame = NSRect(x: 10, y: 4, width: 392, height: 16)
-            graphBox.contentView?.addSubview(legendLabel)
+            let yControl = NSSegmentedControl(labels: ["0–100%", "Zoomed"], trackingMode: .selectOne, target: self, action: #selector(yAxisSegmentChanged(_:)))
+            yControl.selectedSegment = (self.batteryGraphView.yAxisMode == .zoomed) ? 1 : 0
+            yControl.controlSize = .small
+            yControl.font = NSFont.systemFont(ofSize: 10, weight: .regular)
+            yControl.frame = NSRect(x: 420, y: 150, width: 120, height: 24)
+            graphBox.contentView?.addSubview(yControl)
+            self.yScaleControl = yControl
+            
+            batteryGraphView.frame = NSRect(x: 12, y: 12, width: 528, height: 132)
+            if batteryGraphView.superview == nil {
+                graphBox.contentView?.addSubview(batteryGraphView)
+            }
+            
+            // Dedicated Power Status & Icon Legend Box
+            let legendBox = NSBox(frame: NSRect(x: 24, y: 306, width: 552, height: 66))
+            legendBox.title = "Power Status & Icon Legend"
+            content.addSubview(legendBox)
+            
+            let leg1 = NSTextField(labelWithString: "⚡ Charging\nCells actively accepting current")
+            leg1.font = NSFont.systemFont(ofSize: 10, weight: .regular)
+            leg1.cell?.wraps = true
+            leg1.lineBreakMode = .byWordWrapping
+            leg1.maximumNumberOfLines = 2
+            leg1.frame = NSRect(x: 12, y: 6, width: 168, height: 36)
+            legendBox.contentView?.addSubview(leg1)
+            
+            let leg2 = NSTextField(labelWithString: "🔌 AC Pass-Through\nHardware wall power hold (0.00W)")
+            leg2.font = NSFont.systemFont(ofSize: 10, weight: .regular)
+            leg2.cell?.wraps = true
+            leg2.lineBreakMode = .byWordWrapping
+            leg2.maximumNumberOfLines = 2
+            leg2.frame = NSRect(x: 186, y: 6, width: 180, height: 36)
+            legendBox.contentView?.addSubview(leg2)
+            
+            let leg3 = NSTextField(labelWithString: "🔋 On Battery\nDischarging; AC disconnected")
+            leg3.font = NSFont.systemFont(ofSize: 10, weight: .regular)
+            leg3.cell?.wraps = true
+            leg3.lineBreakMode = .byWordWrapping
+            leg3.maximumNumberOfLines = 2
+            leg3.frame = NSRect(x: 372, y: 6, width: 168, height: 36)
+            legendBox.contentView?.addSubview(leg3)
             
             let cfg = ConfigManager.shared.load()
             
             let sliderTitle = NSTextField(labelWithString: "Target Charge Cap (30%–80% Longevity Range):")
             sliderTitle.font = NSFont.systemFont(ofSize: 13, weight: .medium)
-            sliderTitle.frame = NSRect(x: 24, y: 256, width: 340, height: 20)
+            sliderTitle.cell?.wraps = true
+            sliderTitle.lineBreakMode = .byWordWrapping
+            sliderTitle.frame = NSRect(x: 24, y: 270, width: 432, height: 24)
             content.addSubview(sliderTitle)
             
             let valLabel = NSTextField(labelWithString: "\(cfg.targetLimit)%")
             valLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 14, weight: .bold)
-            valLabel.frame = NSRect(x: 380, y: 256, width: 56, height: 20)
+            valLabel.frame = NSRect(x: 468, y: 270, width: 108, height: 24)
             valLabel.alignment = .right
             content.addSubview(valLabel)
             self.limitValueLabel = valLabel
             
             let slider = NSSlider(value: Double(max(30, min(100, cfg.targetLimit))), minValue: 30, maxValue: 100, target: self, action: #selector(sliderChanged(_:)))
-            slider.frame = NSRect(x: 24, y: 228, width: 320, height: 24)
+            slider.frame = NSRect(x: 24, y: 240, width: 432, height: 24)
             slider.numberOfTickMarks = 15
             slider.allowsTickMarkValuesOnly = false
             content.addSubview(slider)
@@ -501,60 +759,68 @@ final class ChargePlanAppDelegate: NSObject, NSApplicationDelegate {
             let tierGuideLabel = NSTextField(labelWithString: "Min Safe: 30%   •   Optimal Mid: 50%   •   Max Health: 80%   •   Full: 100%")
             tierGuideLabel.font = NSFont.systemFont(ofSize: 10, weight: .regular)
             tierGuideLabel.textColor = .secondaryLabelColor
-            tierGuideLabel.frame = NSRect(x: 24, y: 206, width: 412, height: 16)
+            tierGuideLabel.cell?.wraps = true
+            tierGuideLabel.lineBreakMode = .byWordWrapping
+            tierGuideLabel.frame = NSRect(x: 24, y: 216, width: 552, height: 18)
             content.addSubview(tierGuideLabel)
             
             let applyBtn = NSButton(title: "Apply Limit", target: self, action: #selector(applySliderLimit))
             applyBtn.bezelStyle = .rounded
-            applyBtn.frame = NSRect(x: 352, y: 226, width: 88, height: 28)
+            applyBtn.frame = NSRect(x: 468, y: 234, width: 108, height: 36)
             content.addSubview(applyBtn)
             
             let driftCheck = NSButton(checkboxWithTitle: "Enable Drift Margin (-3% window — prevents micro-charge cycling)", target: self, action: #selector(toggleDriftCheckbox(_:)))
             driftCheck.state = cfg.driftEnabled ? .on : .off
-            driftCheck.frame = NSRect(x: 24, y: 176, width: 416, height: 22)
+            driftCheck.frame = NSRect(x: 24, y: 186, width: 552, height: 24)
             content.addSubview(driftCheck)
             self.driftCheckbox = driftCheck
             
             let loginCheck = NSButton(checkboxWithTitle: "Show ChargePlan icon in macOS Menu Bar automatically at login", target: self, action: #selector(toggleLaunchAtLogin))
             loginCheck.state = isLaunchAtLoginEnabled() ? .on : .off
-            loginCheck.frame = NSRect(x: 24, y: 150, width: 416, height: 22)
+            loginCheck.frame = NSRect(x: 24, y: 156, width: 552, height: 24)
             content.addSubview(loginCheck)
             self.loginCheckbox = loginCheck
             
             // Software Updates Box
-            let uBox = NSBox(frame: NSRect(x: 24, y: 64, width: 412, height: 74))
+            let uBox = NSBox(frame: NSRect(x: 24, y: 66, width: 552, height: 78))
             uBox.title = "Software Updates & Version"
             content.addSubview(uBox)
             self.updateBox = uBox
             
             let uLabel = NSTextField(labelWithString: "ChargePlan v\(ChargePlanVersion)")
             uLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
-            uLabel.frame = NSRect(x: 12, y: 30, width: 265, height: 20)
+            uLabel.cell?.wraps = true
+            uLabel.lineBreakMode = .byWordWrapping
+            uLabel.frame = NSRect(x: 12, y: 36, width: 372, height: 24)
             uBox.contentView?.addSubview(uLabel)
             self.updateLabel = uLabel
             
             let uSub = NSTextField(labelWithString: "You are on the latest version.")
             uSub.font = NSFont.systemFont(ofSize: 11, weight: .regular)
             uSub.textColor = .secondaryLabelColor
-            uSub.frame = NSRect(x: 12, y: 8, width: 265, height: 18)
+            uSub.cell?.wraps = true
+            uSub.maximumNumberOfLines = 2
+            uSub.lineBreakMode = .byWordWrapping
+            uSub.frame = NSRect(x: 12, y: 12, width: 372, height: 24)
             uBox.contentView?.addSubview(uSub)
             self.updateSubLabel = uSub
             
             let uBtn = NSButton(title: "Check Updates", target: self, action: #selector(updateActionButtonClicked))
             uBtn.bezelStyle = .rounded
-            uBtn.frame = NSRect(x: 285, y: 12, width: 115, height: 32)
+            uBtn.frame = NSRect(x: 402, y: 18, width: 138, height: 36)
             uBox.contentView?.addSubview(uBtn)
             self.updateActionButton = uBtn
             
+            // Bottom buttons: identically sized (270px width each)
             let installBtn = NSButton(title: "Install / Update Background Daemon", target: self, action: #selector(installDaemonAction))
             installBtn.bezelStyle = .rounded
-            installBtn.frame = NSRect(x: 24, y: 18, width: 235, height: 32)
+            installBtn.frame = NSRect(x: 24, y: 18, width: 270, height: 36)
             content.addSubview(installBtn)
             self.installDaemonButton = installBtn
             
             let uninstallBtn = NSButton(title: "Uninstall Daemon", target: self, action: #selector(uninstallDaemonAction))
             uninstallBtn.bezelStyle = .rounded
-            uninstallBtn.frame = NSRect(x: 270, y: 18, width: 166, height: 32)
+            uninstallBtn.frame = NSRect(x: 306, y: 18, width: 270, height: 36)
             content.addSubview(uninstallBtn)
             self.uninstallDaemonButton = uninstallBtn
             
@@ -564,6 +830,7 @@ final class ChargePlanAppDelegate: NSObject, NSApplicationDelegate {
         refreshSettingsWindow()
         NSApp.activate(ignoringOtherApps: true)
         settingsWindow?.makeKeyAndOrderFront(nil)
+        startFastTelemetryTimer()
     }
     
     private func isDaemonBinaryUpToDate(runningDaemonVersion: String? = nil) -> Bool {
@@ -630,7 +897,7 @@ final class ChargePlanAppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func refreshSettingsWindow() {
-        guard settingsWindow != nil else { return }
+        guard let win = settingsWindow, win.isVisible, !win.isMiniaturized else { return }
         let status = monitor.getCurrentStatus()
         let cfg = ConfigManager.shared.load()
         let daemonInfo = fetchDaemonStatus()
@@ -639,7 +906,7 @@ final class ChargePlanAppDelegate: NSObject, NSApplicationDelegate {
         let govMode = daemonInfo.mode
         
         if daemonActive && upToDate {
-            daemonBadgeLabel?.stringValue = "✅ Background Daemon Active & Up-to-Date (/var/run/chargeplan.sock)"
+            daemonBadgeLabel?.stringValue = "✅ Background Controller Daemon Active & Running"
             daemonBadgeLabel?.textColor = .systemGreen
             installDaemonButton?.title = "Reinstall / Restart Daemon"
         } else if daemonActive && !upToDate {
@@ -660,11 +927,23 @@ final class ChargePlanAppDelegate: NSObject, NSApplicationDelegate {
         
         let stateStr = status.isCharging ? "⚡ Charging" : (status.isACConnected ? "🔌 AC Connected (Not Charging)" : "🔋 On Battery")
         let pctStr = String(format: "%.2f%%", status.exactPercent)
-        batteryLabel?.stringValue = "Battery: \(pctStr) (\(stateStr))  •  Cap: \(cfg.targetLimit)%"
-        governorLabel?.stringValue = "Governor State: \(govMode)"
+        batteryLabel?.stringValue = "Battery: \(pctStr) (\(stateStr))  •  Cap: \(cfg.targetLimit)%  •  Live (1s poll)"
+        governorLabel?.stringValue = "Control Mode: \(govMode)"
         let capText = status.remainingCapacityMAh > 0 ? "Capacity: \(status.remainingCapacityMAh) / \(status.fullChargeCapacityMAh) mAh • " : ""
         telemetryLabel?.stringValue = String(format: "%.2fW (%d mV, %d mA) • %@Health: %.1f%% (%d cycles) • %@", abs(status.wattageW), status.voltageMV, status.amperageMA, capText, status.healthPercent, status.cycleCount, status.thermalState)
-        batteryGraphView?.addSample(percent: status.exactPercent, targetLimit: cfg.targetLimit, isCharging: status.isCharging)
+        
+        if !status.cellVoltagesMV.isEmpty {
+            let cellsStr = status.cellVoltagesMV.map { String(format: "%.3fV", Double($0) / 1000.0) }.joined(separator: "  •  ")
+            let deltaStr = status.cellImbalanceMV != nil ? "  (Δ \(status.cellImbalanceMV!) mV balance)" : ""
+            let tempStr = status.temperatureC != nil ? String(format: "  •  Temp: %.1f°C (%.1f°F)", status.temperatureC!, status.temperatureC! * 9.0 / 5.0 + 32.0) : ""
+            cellLabel?.stringValue = "Cells: \(cellsStr)\(deltaStr)\(tempStr)"
+        } else if let temp = status.temperatureC {
+            cellLabel?.stringValue = String(format: "Battery Pack Temperature: %.1f°C (%.1f°F)", temp, temp * 9.0 / 5.0 + 32.0)
+        } else {
+            cellLabel?.stringValue = ""
+        }
+        
+        batteryGraphView.addSample(percent: status.exactPercent, targetLimit: cfg.targetLimit, isCharging: status.isCharging)
         
         driftCheckbox?.state = cfg.driftEnabled ? .on : .off
         loginCheckbox?.state = isLaunchAtLoginEnabled() ? .on : .off
@@ -724,17 +1003,6 @@ final class ChargePlanAppDelegate: NSObject, NSApplicationDelegate {
         } else {
             runPrivilegedCLI("drift off")
         }
-        rebuildMenu()
-        refreshSettingsWindow()
-    }
-    
-    @objc private func triggerManualKick() {
-        if let resp = UnixSocketClient.send("KICK"), resp.contains("\"success\":true") {
-            rebuildMenu()
-            refreshSettingsWindow()
-            return
-        }
-        fallbackHardware.kickPowerUIRefresh()
         rebuildMenu()
         refreshSettingsWindow()
     }
@@ -942,6 +1210,50 @@ final class ChargePlanAppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
+    }
+    
+    // MARK: - NSWindowDelegate & Fast Telemetry
+    func windowDidBecomeKey(_ notification: Notification) {
+        startFastTelemetryTimer()
+    }
+    
+    func windowWillClose(_ notification: Notification) {
+        stopFastTelemetryTimer()
+    }
+    
+    func windowDidMiniaturize(_ notification: Notification) {
+        stopFastTelemetryTimer()
+    }
+    
+    func windowDidDeminiaturize(_ notification: Notification) {
+        startFastTelemetryTimer()
+    }
+    
+    private func startFastTelemetryTimer() {
+        guard windowTelemetryTimer == nil else { return }
+        refreshSettingsWindow()
+        windowTelemetryTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self = self, let win = self.settingsWindow, win.isVisible, !win.isMiniaturized else {
+                    self?.stopFastTelemetryTimer()
+                    return
+                }
+                self.refreshSettingsWindow()
+                self.updateMenuBarTitleOnly()
+            }
+        }
+    }
+    
+    private func stopFastTelemetryTimer() {
+        windowTelemetryTimer?.invalidate()
+        windowTelemetryTimer = nil
+    }
+    
+    private func updateMenuBarTitleOnly() {
+        let status = monitor.getCurrentStatus()
+        let cfg = ConfigManager.shared.load()
+        let iconPrefix = status.isCharging ? "⚡" : (status.isACConnected ? "🔌" : "🔋")
+        statusItem.button?.title = "\(iconPrefix) \(status.percent)% → \(cfg.targetLimit)%"
     }
     
     @objc private func quitApp() {

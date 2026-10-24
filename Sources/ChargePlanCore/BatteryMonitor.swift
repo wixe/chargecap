@@ -121,9 +121,14 @@ public class BatteryMonitor {
         }
         
         var exactPercent = Double(percent)
-        if fullCapacity > 0 && remainingCapacity > 0 {
-            let raw = (Double(remainingCapacity) / Double(fullCapacity)) * 100.0
-            exactPercent = max(0.0, min(100.0, (raw * 100.0).rounded() / 100.0))
+        if percent >= 100 {
+            exactPercent = 100.0
+        } else if percent > 0 && fullCapacity > 0 && remainingCapacity > 0 {
+            let stepMAh = max(1.0, Double(fullCapacity) / 100.0)
+            let fraction = fmod(Double(remainingCapacity), stepMAh) / stepMAh
+            let clampedFraction = max(0.0, min(0.99, fraction))
+            let roundedFraction = min(0.99, (clampedFraction * 100.0).rounded() / 100.0)
+            exactPercent = Double(percent) + roundedFraction
         }
         
         let tState = ProcessInfo.processInfo.thermalState
@@ -134,6 +139,43 @@ public class BatteryMonitor {
         case .serious: thermalString = "Serious (Throttled)"
         case .critical: thermalString = "Critical"
         @unknown default: thermalString = "Unknown"
+        }
+        
+        // 3. Read Individual Cell Voltages and Internal Battery Temperature
+        var cellVoltages: [Int] = []
+        var bankIter: io_iterator_t = 0
+        if IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("AppleSmartBatteryBank"), &bankIter) == kIOReturnSuccess {
+            var bankService = IOIteratorNext(bankIter)
+            while bankService != 0 {
+                var bankProps: Unmanaged<CFMutableDictionary>?
+                if IORegistryEntryCreateCFProperties(bankService, &bankProps, kCFAllocatorDefault, 0) == kIOReturnSuccess,
+                   let dict = bankProps?.takeRetainedValue() as? [String: Any],
+                   let bdata = dict["BatteryData"] as? [String: Any],
+                   let cellV = bdata["CellVoltage"] as? Int {
+                    cellVoltages.append(cellV)
+                }
+                IOObjectRelease(bankService)
+                bankService = IOIteratorNext(bankIter)
+            }
+            IOObjectRelease(bankIter)
+        }
+        
+        var tempC: Double? = nil
+        var packIter: io_iterator_t = 0
+        if IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("AppleSmartBatteryPack"), &packIter) == kIOReturnSuccess {
+            var packService = IOIteratorNext(packIter)
+            while packService != 0 {
+                var packProps: Unmanaged<CFMutableDictionary>?
+                if IORegistryEntryCreateCFProperties(packService, &packProps, kCFAllocatorDefault, 0) == kIOReturnSuccess,
+                   let dict = packProps?.takeRetainedValue() as? [String: Any],
+                   let bdata = dict["BatteryData"] as? [String: Any],
+                   let tempRaw = bdata["Temperature"] as? Int {
+                    tempC = Double(tempRaw) / 100.0
+                }
+                IOObjectRelease(packService)
+                packService = IOIteratorNext(packIter)
+            }
+            IOObjectRelease(packIter)
         }
         
         return BatteryStatus(
@@ -154,6 +196,8 @@ public class BatteryMonitor {
             timeRemainingMinutes: timeRemaining,
             serialNumber: serialNumber,
             thermalState: thermalString,
+            temperatureC: tempC,
+            cellVoltagesMV: cellVoltages,
             notChargingReason: notChargingReason
         )
     }

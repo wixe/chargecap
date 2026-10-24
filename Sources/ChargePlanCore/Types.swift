@@ -18,8 +18,15 @@ public struct BatteryStatus: Codable {
     public let timeRemainingMinutes: Int
     public let serialNumber: String
     public let thermalState: String
+    public let temperatureC: Double?
+    public let cellVoltagesMV: [Int]
     public let notChargingReason: Int
     public let timestamp: Date
+    
+    public var cellImbalanceMV: Int? {
+        guard let minV = cellVoltagesMV.min(), let maxV = cellVoltagesMV.max(), cellVoltagesMV.count >= 2 else { return nil }
+        return maxV - minV
+    }
     
     enum CodingKeys: String, CodingKey {
         case percent
@@ -39,6 +46,8 @@ public struct BatteryStatus: Codable {
         case timeRemainingMinutes
         case serialNumber
         case thermalState
+        case temperatureC
+        case cellVoltagesMV
         case notChargingReason
         case timestamp
     }
@@ -61,6 +70,8 @@ public struct BatteryStatus: Codable {
         timeRemainingMinutes: Int,
         serialNumber: String,
         thermalState: String,
+        temperatureC: Double? = nil,
+        cellVoltagesMV: [Int] = [],
         notChargingReason: Int = 0,
         timestamp: Date = Date()
     ) {
@@ -81,6 +92,8 @@ public struct BatteryStatus: Codable {
         self.timeRemainingMinutes = timeRemainingMinutes
         self.serialNumber = serialNumber
         self.thermalState = thermalState
+        self.temperatureC = temperatureC
+        self.cellVoltagesMV = cellVoltagesMV
         self.notChargingReason = notChargingReason
         self.timestamp = timestamp
     }
@@ -105,6 +118,8 @@ public struct BatteryStatus: Codable {
         self.timeRemainingMinutes = try c.decodeIfPresent(Int.self, forKey: .timeRemainingMinutes) ?? -1
         self.serialNumber = try c.decodeIfPresent(String.self, forKey: .serialNumber) ?? "Unknown"
         self.thermalState = try c.decodeIfPresent(String.self, forKey: .thermalState) ?? "Nominal"
+        self.temperatureC = try c.decodeIfPresent(Double.self, forKey: .temperatureC)
+        self.cellVoltagesMV = try c.decodeIfPresent([Int].self, forKey: .cellVoltagesMV) ?? []
         self.notChargingReason = try c.decodeIfPresent(Int.self, forKey: .notChargingReason) ?? 0
         self.timestamp = try c.decodeIfPresent(Date.self, forKey: .timestamp) ?? Date()
     }
@@ -117,7 +132,6 @@ public struct GovernorConfig: Codable, Equatable {
     public var thermalProtectionEnabled: Bool
     public var autoServerMode: Bool
     public var pollIntervalSeconds: Double
-    public var kickCooldownSeconds: Double
     
     // Backwards-compatible aliases for deadband
     public var deadbandEnabled: Bool {
@@ -140,7 +154,6 @@ public struct GovernorConfig: Codable, Equatable {
         case thermalProtectionEnabled
         case autoServerMode
         case pollIntervalSeconds
-        case kickCooldownSeconds
     }
     
     public init(
@@ -149,8 +162,7 @@ public struct GovernorConfig: Codable, Equatable {
         driftMargin: Int,
         thermalProtectionEnabled: Bool,
         autoServerMode: Bool,
-        pollIntervalSeconds: Double,
-        kickCooldownSeconds: Double = 60.0
+        pollIntervalSeconds: Double
     ) {
         self.targetLimit = targetLimit
         self.driftEnabled = driftEnabled
@@ -158,7 +170,6 @@ public struct GovernorConfig: Codable, Equatable {
         self.thermalProtectionEnabled = thermalProtectionEnabled
         self.autoServerMode = autoServerMode
         self.pollIntervalSeconds = pollIntervalSeconds
-        self.kickCooldownSeconds = kickCooldownSeconds
     }
     
     // Legacy initializer supporting deadband naming
@@ -168,8 +179,7 @@ public struct GovernorConfig: Codable, Equatable {
         deadbandDelta: Int,
         thermalProtectionEnabled: Bool,
         autoServerMode: Bool,
-        pollIntervalSeconds: Double,
-        kickCooldownSeconds: Double = 60.0
+        pollIntervalSeconds: Double
     ) {
         self.targetLimit = targetLimit
         self.driftEnabled = deadbandEnabled
@@ -177,7 +187,6 @@ public struct GovernorConfig: Codable, Equatable {
         self.thermalProtectionEnabled = thermalProtectionEnabled
         self.autoServerMode = autoServerMode
         self.pollIntervalSeconds = pollIntervalSeconds
-        self.kickCooldownSeconds = kickCooldownSeconds
     }
     
     public init(from decoder: Decoder) throws {
@@ -194,7 +203,6 @@ public struct GovernorConfig: Codable, Equatable {
         self.thermalProtectionEnabled = try c.decodeIfPresent(Bool.self, forKey: .thermalProtectionEnabled) ?? true
         self.autoServerMode = try c.decodeIfPresent(Bool.self, forKey: .autoServerMode) ?? true
         self.pollIntervalSeconds = try c.decodeIfPresent(Double.self, forKey: .pollIntervalSeconds) ?? 5.0
-        self.kickCooldownSeconds = try c.decodeIfPresent(Double.self, forKey: .kickCooldownSeconds) ?? 60.0
     }
     
     public func encode(to encoder: Encoder) throws {
@@ -207,7 +215,6 @@ public struct GovernorConfig: Codable, Equatable {
         try c.encode(thermalProtectionEnabled, forKey: .thermalProtectionEnabled)
         try c.encode(autoServerMode, forKey: .autoServerMode)
         try c.encode(pollIntervalSeconds, forKey: .pollIntervalSeconds)
-        try c.encode(kickCooldownSeconds, forKey: .kickCooldownSeconds)
     }
     
     public static var `default`: GovernorConfig {
@@ -217,8 +224,7 @@ public struct GovernorConfig: Codable, Equatable {
             driftMargin: 3,
             thermalProtectionEnabled: true,
             autoServerMode: true,
-            pollIntervalSeconds: 5.0,
-            kickCooldownSeconds: 60.0
+            pollIntervalSeconds: 5.0
         )
     }
 }
@@ -232,9 +238,6 @@ public struct GovernorState: Codable {
     public var lastActionTimestamp: Date
     public var lastActionReason: String
     public var consecutiveErrors: Int
-    public var lastKickTimestamp: Date?
-    public var lastKickPercent: Int?
-    public var kickCount: Int
     
     // Backwards-compatible alias for inDeadband
     public var inDeadband: Bool {
@@ -251,10 +254,7 @@ public struct GovernorState: Codable {
             modeDescription: "Initializing",
             lastActionTimestamp: Date(),
             lastActionReason: "Daemon started",
-            consecutiveErrors: 0,
-            lastKickTimestamp: nil,
-            lastKickPercent: nil,
-            kickCount: 0
+            consecutiveErrors: 0
         )
     }
 }

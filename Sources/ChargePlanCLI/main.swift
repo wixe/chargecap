@@ -16,8 +16,6 @@ func printHelp() {
       status [--json]           Display battery health, power telemetry, and governor status
       set <limit>               Set target charge limit (e.g. 50, 80)
       drift <on|off> [margin]   Configure drift margin (e.g. drift on 3)
-      kick                      Trigger immediate software refresh kick to lock into AC pass-through
-      cooldown <seconds>        Configure minimum cooldown between over-limit kicks (default: 60s)
       daemon                    Run the power governor in the foreground
       install                   Install background system service (keeps limit active when sleeping or logged out)
       uninstall                 Remove background system service
@@ -57,7 +55,7 @@ func handleStatus(jsonOutput: Bool) {
     let hw = HardwareBackend()
     
     var governorMode = "Offline (Run 'sudo chargeplan install')"
-    var kickDetails = ""
+    var ceilingLine = ""
     if let liveJson = UnixSocketClient.send("STATUS"),
        let data = liveJson.data(using: .utf8),
        let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -65,10 +63,8 @@ func handleStatus(jsonOutput: Bool) {
         if let mode = gov["mode"] as? String {
             governorMode = mode
         }
-        if let count = gov["kick_count"] as? Int, count > 0 {
-            let lastPct = gov["last_kick_percent"] as? Int
-            let pctStr = (lastPct != nil && lastPct! >= 0) ? " (last at \(lastPct!)%)" : ""
-            kickDetails = "\n  Power Latch Kicks:  \(count) triggered\(pctStr)"
+        if let soc = gov["enforced_soc"] as? Int, soc > 0 {
+            ceilingLine = "\n  powerd Ceiling:     \(soc)%"
         }
     }
     
@@ -80,17 +76,29 @@ func handleStatus(jsonOutput: Bool) {
     let bar = String(repeating: "█", count: max(0, min(healthBarLength, filledHealth))) +
               String(repeating: "░", count: max(0, healthBarLength - filledHealth))
     
+    var cellDetails = ""
+    if !status.cellVoltagesMV.isEmpty {
+        let cellsFormatted = status.cellVoltagesMV.enumerated().map { "Cell \($0.offset + 1): \($0.element) mV" }.joined(separator: "  •  ")
+        let delta = status.cellImbalanceMV != nil ? " (Δ \(status.cellImbalanceMV!) mV)" : ""
+        cellDetails = "\n  Cell Voltages:      \(cellsFormatted)\(delta)"
+    }
+    var tempDetails = ""
+    if let t = status.temperatureC {
+        let fahrenheit = t * 9.0 / 5.0 + 32.0
+        tempDetails = String(format: "\n  Battery Temp:       %.1f°C (%.1f°F)", t, fahrenheit)
+    }
+    
     print("""
     ========================================================================
-    ⚡ CHARGEPLAN POWER TELEMETRY & GOVERNOR
+    ⚡ CHARGEPLAN POWER TELEMETRY & CONTROLLER
     ========================================================================
       Battery Level:      \(String(format: "%.2f%%", status.exactPercent)) (\(chargingStr))
       Target Limit:       \(cfg.targetLimit)% \(cfg.driftEnabled ? "(Drift -\(cfg.driftMargin)%)" : "(Strict)")
-      Governor State:     \(governorMode)\(kickDetails)
+      Control Mode:       \(governorMode)\(ceilingLine)
       Health Condition:   [\(bar)] \(status.healthPercent)%
       Cycle Count:        \(status.cycleCount) cycles
       Voltage & Current:  \(status.voltageMV) mV  •  \(status.amperageMA) mA (\(wattageStr))
-      Hardware Capacity:  \(status.remainingCapacityMAh > 0 ? "\(status.remainingCapacityMAh) / " : "")\(status.fullChargeCapacityMAh) / \(status.designCapacityMAh) mAh
+      Hardware Capacity:  \(status.remainingCapacityMAh > 0 ? "\(status.remainingCapacityMAh) / " : "")\(status.fullChargeCapacityMAh) / \(status.designCapacityMAh) mAh\(cellDetails)\(tempDetails)
       Thermal State:      \(status.thermalState)
       Hardware Backend:   \(hw.modeName)
       Serial Number:      \(status.serialNumber)
@@ -180,47 +188,8 @@ func handleDrift(args: [String]) {
     }
 }
 
-func handleKick() {
-    if let resp = UnixSocketClient.send("KICK") {
-        if resp.contains("\"success\":true") {
-            if let data = resp.data(using: .utf8),
-               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let count = obj["kick_count"] as? Int,
-               let pct = obj["percent"] as? Int {
-                print("⚡ Software refresh kick #\(count) dispatched at \(pct)% (signaled powerd & PowerUIAgent).")
-            } else {
-                print("⚡ Software refresh kick dispatched to powerd and PowerUIAgent.")
-            }
-            return
-        }
-    }
-    let hw = HardwareBackend()
-    hw.kickPowerUIRefresh()
-    print("⚡ Software refresh kick triggered directly.")
-}
-
-func handleCooldown(args: [String]) {
-    guard let first = args.first, let secs = Double(first), (10...600).contains(secs) else {
-        print("❌ Error: Please specify a cooldown in seconds between 10 and 600 (e.g. 'chargeplan cooldown 60')")
-        exit(1)
-    }
-    if let resp = UnixSocketClient.send("KICK_COOLDOWN \(secs)") {
-        if resp.contains("\"success\":true") {
-            print("✅ Kick rate limit updated: maximum 1 kick every \(Int(secs))s.")
-            return
-        }
-    }
-    var cfg = ConfigManager.shared.load()
-    cfg.kickCooldownSeconds = secs
-    if ConfigManager.shared.save(cfg) {
-        print("✅ Kick rate limit saved: maximum 1 kick every \(Int(secs))s.")
-    } else {
-        print("⚠️ Warning: Could not write configuration. Try running with 'sudo'.")
-    }
-}
-
 func handleDaemon() {
-    print("🚀 Starting ChargePlan Governor Daemon...")
+    print("🚀 Starting ChargePlan Controller Daemon...")
     
     // Auto-migrate legacy LaunchDaemon plist if running as root
     if getuid() == 0 && FileManager.default.fileExists(atPath: "/Library/LaunchDaemons/com.wixe.chargeplan.daemon.plist") {
@@ -535,10 +504,6 @@ case "set":
     handleSet(args: Array(args.dropFirst()))
 case "drift", "deadband":
     handleDrift(args: Array(args.dropFirst()))
-case "kick":
-    handleKick()
-case "cooldown":
-    handleCooldown(args: Array(args.dropFirst()))
 case "daemon":
     handleDaemon()
 case "install":

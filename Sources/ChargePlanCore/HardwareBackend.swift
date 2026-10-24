@@ -20,6 +20,10 @@ public class HardwareBackend {
     private var powerUIClient: AnyObject?
     private var powerUIClass: NSObject.Type?
     private var powerUIAvailableLimits: [Int] = []
+    private var lastPublishedLimit: Int = -1
+    private var lastPublishAt: Date = .distantPast
+    private var powerdCache: (at: Date, value: Int?)?
+    private let powerdLock = NSLock()
     
     public init() {
         self.smcDriver = SMCDriver()
@@ -198,10 +202,13 @@ public class HardwareBackend {
         }
     }
     
-    public func setChargeLimitPercentage(_ limit: Int, delta: Int = 3) -> Bool {
+    public func setChargeLimitPercentage(_ limit: Int, delta: Int = 3, force: Bool = false) -> Bool {
         let clamped = max(30, min(100, limit))
         self.currentLimit = clamped
         self.currentDelta = max(1, delta)
+        if force {
+            lastPublishedLimit = -1
+        }
         
         switch activeMode {
         case .directSMC:
@@ -253,16 +260,6 @@ public class HardwareBackend {
         }
     }
     
-    private func nearestPowerUILimit(_ requested: Int) -> Int {
-        guard !powerUIAvailableLimits.isEmpty else {
-            return max(80, min(100, requested))
-        }
-        for candidate in powerUIAvailableLimits where candidate >= requested {
-            return candidate
-        }
-        return powerUIAvailableLimits.last ?? 80
-    }
-    
     private func getCurrentPowerUILimit() -> (enabled: Bool, limit: Int)? {
         guard let cls = powerUIClass, let client = powerUIClient else { return nil }
         let getSel = NSSelectorFromString("getMCLLimitWithError:")
@@ -294,92 +291,154 @@ public class HardwareBackend {
         return unsafeBitCast(method_getImplementation(method), to: SetFn.self)(client, setSel, target, &err)
     }
     
-    public func kickPowerUIRefresh(dwellSeconds: Double = 1.2) {
-        // Physical AC disconnection requires ~1.0-1.5 seconds for macOS powerd and the
-        // Battery Management Unit (BMU) debounce filters to register the power path change.
-        // An instantaneous kick does not allow the hardware filter to clear.
-        // We replicate this debounce window by:
-        // 1. Signaling powerd and PowerUIAgent of the transient power change
-        // 2. Dwelling for ~1.2s (matching physical AC unplug detection time)
-        // 3. Re-asserting the target limit and broadcasting smart charging refresh.
-        
-        if activeMode == .nativePowerUI {
-            _ = disablePowerUILimit()
-        } else {
-            _ = setChargingInhibited(false)
+    /// Highest `chargeSocLimitSoc` currently registered with powerd, if any.
+    /// While on battery, powerd often reports no policy even when a ceiling is saved.
+    /// The reading is cached for two seconds so status and the governor share one `pmset`.
+    public func powerdSocLimit() -> Int? {
+        powerdLock.lock()
+        defer { powerdLock.unlock() }
+        if let cache = powerdCache, Date().timeIntervalSince(cache.at) < 2 {
+            return cache.value
         }
-        
-        if geteuid() == 0 {
-            let killProc = Process()
-            killProc.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
-            killProc.arguments = ["-HUP", "PowerUIAgent"]
-            try? killProc.run()
-            killProc.waitUntilExit()
-        }
-        
-        let powerdNotify = Process()
-        powerdNotify.executableURL = URL(fileURLWithPath: "/usr/bin/notifyutil")
-        powerdNotify.arguments = ["-p", "com.apple.system.powersources.source"]
-        try? powerdNotify.run()
-        powerdNotify.waitUntilExit()
-        
-        // Dwell matching the ~1-second physical AC unplug detection window
-        if dwellSeconds > 0 {
-            Thread.sleep(forTimeInterval: dwellSeconds)
-        }
-        
-        if activeMode == .nativePowerUI {
-            let target = nearestPowerUILimit(currentLimit)
-            _ = setDirectXPCMCLLimit(UInt8(target))
-        } else {
-            _ = setChargingInhibited(true)
-        }
-        
-        triggerPowerUIRefresh()
+        let value = Self.parsePowerdSocLimits(Self.readPmsetBattlimit()).max()
+        powerdCache = (Date(), value)
+        return value
     }
     
-    private func triggerPowerUIRefresh() {
-        // 1. Post Darwin notification that PowerUIAgent listens for
-        let notifyProc = Process()
-        notifyProc.executableURL = URL(fileURLWithPath: "/usr/bin/notifyutil")
-        notifyProc.arguments = ["-p", "com.apple.smartcharging.defaultschanged"]
-        try? notifyProc.run()
-        notifyProc.waitUntilExit()
-        
-        // 2. Notify system powerd to re-evaluate power source routing immediately
-        let powerdNotify = Process()
-        powerdNotify.executableURL = URL(fileURLWithPath: "/usr/bin/notifyutil")
-        powerdNotify.arguments = ["-p", "com.apple.system.powersources.source"]
-        try? powerdNotify.run()
-        powerdNotify.waitUntilExit()
-        
-        // 3. If running as root (the daemon), send HUP to PowerUIAgent to force
-        // an instant latch into "AC attached; not charging" without a physical cable pull.
-        if geteuid() == 0 {
-            let killProc = Process()
-            killProc.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
-            killProc.arguments = ["-HUP", "PowerUIAgent"]
-            try? killProc.run()
-            killProc.waitUntilExit()
+    private func invalidatePowerdCache() {
+        powerdLock.lock()
+        powerdCache = nil
+        powerdLock.unlock()
+    }
+    
+    static func parsePowerdSocLimits(_ text: String) -> [Int] {
+        var values: [Int] = []
+        for raw in text.split(separator: "\n") {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            guard let range = line.range(of: "chargeSocLimitSoc") else { continue }
+            let tail = line[range.upperBound...]
+            let digits = tail.filter(\.isNumber)
+            if let value = Int(digits), (1...100).contains(value) {
+                values.append(value)
+            }
         }
+        return values
+    }
+    
+    private static func readPmsetBattlimit() -> String {
+        runCommand("/usr/bin/pmset", ["-g", "battlimit"]).output
+    }
+    
+    @discardableResult
+    private static func runCommand(_ path: String, _ args: [String]) -> (status: Int32, output: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: path)
+        process.arguments = args
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return (-1, "")
+        }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        return (process.terminationStatus, String(data: data, encoding: .utf8) ?? "")
     }
     
     private func applyPowerUILimit(_ requested: Int) -> Bool {
-        // Clamp to nearest valid hardware limit supported by PowerUI (80, 85, 90, 95, 100)
-        let target = nearestPowerUILimit(requested)
-        
-        // Fast path: if PowerUIAgent already has MCL enabled at the exact target SoC, ensure refreshed and return
-        if let current = getCurrentPowerUILimit(), current.enabled && current.limit == target {
+        let clamped = max(20, min(100, requested))
+        if clamped == lastPublishedLimit, Date().timeIntervalSince(lastPublishAt) < 15 {
             return true
         }
+        invalidatePowerdCache()
         
-        let success = setDirectXPCMCLLimit(UInt8(target))
+        // 80–100 is accepted by setMCLLimit:. Below 80 the XPC handler returns
+        // PowerUISmartChargingErrorDomain error 4 and leaves the previous ceiling
+        // (usually 80) in place, so the battery keeps charging toward that floor.
+        if clamped >= 80 {
+            if !powerUIAvailableLimits.isEmpty && !powerUIAvailableLimits.contains(clamped) {
+                logger.info("Charge limit \(clamped, privacy: .public) is between the advertised steps; sending it directly")
+            }
+            let ok = setDirectXPCMCLLimit(UInt8(clamped))
+            if ok, geteuid() == 0 {
+                _ = publishTopOffPreference(limit: clamped, enabled: true)
+                notifyChargeLimitChanged(restartAgent: false)
+            }
+            if ok {
+                lastPublishedLimit = clamped
+                lastPublishAt = Date()
+            } else {
+                logger.error("setMCLLimit \(clamped, privacy: .public) was rejected")
+            }
+            return ok
+        }
         
-        // Software refresh kick: forces powerd and PowerUIAgent to latch into
-        // "AC attached; not charging" immediately without needing to unplug and replug.
-        triggerPowerUIRefresh()
+        guard geteuid() == 0 else {
+            logger.error("A charge limit below 80% has to be published by the root daemon")
+            return false
+        }
         
-        return success
+        // Arm the feature, then overwrite the saved value. setMCLLimit: would
+        // clamp this back to 80, so it must not be called with the real target.
+        if getCurrentPowerUILimit()?.enabled != true {
+            _ = enableMCL()
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        guard publishTopOffPreference(limit: clamped, enabled: true) else {
+            logger.error("Failed to write mclLimitValue \(clamped, privacy: .public)")
+            return false
+        }
+        notifyChargeLimitChanged(restartAgent: true)
+        lastPublishedLimit = clamped
+        lastPublishAt = Date()
+        logger.info("Published sub-80 charge ceiling \(clamped, privacy: .public) to powerd")
+        return true
+    }
+    
+    private func enableMCL() -> Bool {
+        guard let cls = powerUIClass, let client = powerUIClient else { return false }
+        let sel = NSSelectorFromString("enableMCL:")
+        guard let method = class_getInstanceMethod(cls, sel) else { return false }
+        typealias EnFn = @convention(c) (AnyObject, Selector, UnsafeMutablePointer<NSError?>) -> Bool
+        var err: NSError? = nil
+        return unsafeBitCast(method_getImplementation(method), to: EnFn.self)(client, sel, &err)
+    }
+    
+    /// PowerUIAgent (root) reloads this domain on `com.apple.smartcharging.defaultschanged`
+    /// and forwards `mclLimitValue` to powerd without the 80–100 XPC check.
+    private func publishTopOffPreference(limit: Int, enabled: Bool) -> Bool {
+        let domain = "com.apple.smartcharging.topoffprotection" as CFString
+        let user = kCFPreferencesCurrentUser
+        let host = kCFPreferencesAnyHost
+        func put(_ key: String, _ value: CFPropertyList) {
+            CFPreferencesSetValue(key as CFString, value, domain, user, host)
+        }
+        if enabled {
+            let number = NSNumber(value: limit)
+            put("mclLimitValue", number)
+            put("mclTargetSoC", number)
+            put("MCLSavedTargetSoC", number)
+            put("MCLFeatureState", NSNumber(value: 1))
+            put("enabled", kCFBooleanTrue)
+        } else {
+            put("MCLFeatureState", NSNumber(value: 0))
+            put("enabled", kCFBooleanFalse)
+            put("mclLimitValue", NSNumber(value: 100))
+        }
+        return CFPreferencesSynchronize(domain, user, host)
+    }
+    
+    private func notifyChargeLimitChanged(restartAgent: Bool) {
+        _ = Self.runCommand("/usr/bin/notifyutil", ["-p", "com.apple.smartcharging.defaultschanged"])
+        
+        guard restartAgent, geteuid() == 0 else { return }
+        // PowerUIAgent reloads the preference on SIGHUP. launchd keeps it running.
+        _ = Self.runCommand("/usr/bin/killall", ["-HUP", "PowerUIAgent"])
+        Thread.sleep(forTimeInterval: 0.4)
+        setupPowerUI()
+        invalidatePowerdCache()
     }
     
     private func disablePowerUILimit() -> Bool {
@@ -392,8 +451,11 @@ public class HardwareBackend {
         typealias DisFn = @convention(c) (AnyObject, Selector, UnsafeMutablePointer<NSError?>) -> Bool
         var err: NSError? = nil
         let res = unsafeBitCast(method_getImplementation(method), to: DisFn.self)(client, disSel, &err)
-        if res {
-            triggerPowerUIRefresh()
+        if res, geteuid() == 0 {
+            _ = publishTopOffPreference(limit: 100, enabled: false)
+            notifyChargeLimitChanged(restartAgent: false)
+            lastPublishedLimit = 100
+            lastPublishAt = Date()
         }
         return res
     }

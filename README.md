@@ -109,11 +109,11 @@ Running `chargeplan status` displays high-precision hardware diagnostics:
 
 ```text
 ========================================================================
-⚡ CHARGEPLAN POWER TELEMETRY & GOVERNOR
+⚡ CHARGEPLAN POWER TELEMETRY & CONTROLLER
 ========================================================================
   Battery Level:      55.12% (🔌 AC Connected (Not Charging))
   Target Limit:       50% (Drift -3%)
-  Governor State:     Holding Cap at 50% (Idle AC Pass-through)
+  Control Mode:       Holding Cap at 50% (Idle AC Pass-through)
   Health Condition:   [██████████████████░░] 86.2%
   Cycle Count:        121 cycles
   Voltage & Current:  11389 mV  •  0 mA (0.00W)
@@ -158,8 +158,9 @@ On macOS 27 (and firmware shipping with recent security updates), Apple gated le
 
 ChargePlan automatically uses Apple’s native manual charge-limit mechanism inside `powerd`:
 
-- For limits ≥ 80% it uses the public PowerUI XPC path (the same backend used by System Settings → Battery → Charge Limit).
-- For limits below 80% (e.g. 50%) it writes to `com.apple.smartcharging.topoffprotection` and notifies `powerd`. The 80–100% boundary check exists only in Apple's front-end UI; the system preference forwards the value to hardware directly. This engages a firmware SoC ceiling with true AC pass-through (~0 mA battery current) that holds through sleep.
+- For limits from 80% to 100% it uses PowerUI's `setMCLLimit:` (the same backend as System Settings → Battery → Charge Limit).
+- For limits below 80% (e.g. 50%) that call is rejected (`PowerUISmartChargingErrorDomain` error 4) and would otherwise leave the previous 80% ceiling in place, so the battery keeps charging. The root daemon writes `mclLimitValue` into `com.apple.smartcharging.topoffprotection` and posts `com.apple.smartcharging.defaultschanged`. The 80–100% check lives only in the XPC handler; PowerUIAgent forwards the preference to `powerd` without it.
+- The daemon republishes that ceiling only when `powerd`'s registered SoC does not match the target. It never disables the limit to force a refresh: `disableMCL` clears the policy and charging resumes.
 
 Once the battery reaches the target, the Mac runs entirely from the adapter. The governor continues to re-assert the limit after sleep, lid events, or power renegotiation.
 

@@ -185,26 +185,6 @@ public final class UnixSocketServer {
             governor.updateConfig(cfg)
             return "{\"success\":true,\"drift_enabled\":\(enabled),\"drift_margin\":\(margin),\"deadband_enabled\":\(enabled),\"deadband_delta\":\(margin)}\n"
             
-        case "KICK":
-            guard isAuthorized else {
-                return "{\"error\":\"Permission denied: console user, admin, or root (sudo) privileges required to control power\"}\n"
-            }
-            _ = governor.triggerRefreshKick(reason: "Manual kick via IPC")
-            let batt = governor.monitor.getCurrentStatus()
-            return "{\"success\":true,\"message\":\"Software power refresh kick dispatched.\",\"kick_count\":\(governor.state.kickCount),\"percent\":\(batt.percent)}\n"
-            
-        case "KICK_COOLDOWN":
-            guard isAuthorized else {
-                return "{\"error\":\"Permission denied: console user, admin, or root (sudo) privileges required to control power\"}\n"
-            }
-            guard parts.count >= 2, let secs = Double(parts[1]), (10...600).contains(secs) else {
-                return "{\"error\":\"Usage: KICK_COOLDOWN <seconds (10-600)>\"}\n"
-            }
-            var cfg = governor.config
-            cfg.kickCooldownSeconds = secs
-            governor.updateConfig(cfg)
-            return "{\"success\":true,\"kick_cooldown_seconds\":\(secs)}\n"
-            
         case "UPGRADE":
             var sourcePath = "/Applications/ChargePlan.app/Contents/Resources/chargeplan"
             if parts.count >= 2 {

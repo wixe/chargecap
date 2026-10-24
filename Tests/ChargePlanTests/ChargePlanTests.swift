@@ -111,23 +111,46 @@ final class ChargePlanTests: XCTestCase {
         XCTAssertTrue(decoded.isNewer)
     }
     
-    func testGovernorKickState() {
-        var state = GovernorState.initial
-        XCTAssertNil(state.lastKickPercent)
-        XCTAssertEqual(state.kickCount, 0)
-        
-        state.lastKickPercent = 80
-        state.kickCount = 1
-        XCTAssertEqual(state.lastKickPercent, 80)
-        XCTAssertEqual(state.kickCount, 1)
-        
+    func testPowerdSocParsing() {
+        let sample = """
+        Battery level limits:
+        (
+                {
+                chargeSocLimitSoc = 80;
+                chargeSocLimitReason = manualChargeLimit;
+            },
+                {
+                chargeSocLimitSoc = 50;
+            }
+        )
+        """
+        XCTAssertEqual(HardwareBackend.parsePowerdSocLimits(sample), [80, 50])
+        XCTAssertEqual(HardwareBackend.parsePowerdSocLimits("No battery level limits set\n"), [])
+    }
+    
+    func testReportOmitsKickFields() {
         let governor = AIGovernor()
         let report = governor.getCombinedReport()
         guard let gov = report["governor"] as? [String: Any] else {
             XCTFail("Missing governor dictionary")
             return
         }
-        XCTAssertNotNil(gov["kick_count"])
-        XCTAssertNotNil(gov["last_kick_percent"])
+        XCTAssertNotNil(gov["enforced_soc"])
+        XCTAssertNil(gov["kick_count"])
+        XCTAssertNil(gov["last_kick_percent"])
+        XCTAssertNil(gov["kick_cooldown_seconds"])
+    }
+    
+    func testLegacyKickConfigKeysAreIgnored() throws {
+        let json = """
+        {"targetLimit":50,"driftEnabled":true,"driftMargin":3,"thermalProtectionEnabled":true,"autoServerMode":true,"pollIntervalSeconds":5,"kickCooldownSeconds":12,"kickDwellSeconds":8}
+        """.data(using: .utf8)!
+        let cfg = try JSONDecoder().decode(GovernorConfig.self, from: json)
+        XCTAssertEqual(cfg.targetLimit, 50)
+        XCTAssertEqual(cfg.driftMargin, 3)
+        let encoded = try JSONEncoder().encode(cfg)
+        let obj = try JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        XCTAssertNil(obj?["kickCooldownSeconds"])
+        XCTAssertNil(obj?["kickDwellSeconds"])
     }
 }
