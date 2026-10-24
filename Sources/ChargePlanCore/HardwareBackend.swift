@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import ObjectiveC
 import OSLog
 
@@ -22,7 +23,7 @@ public class HardwareBackend {
     private var powerUIAvailableLimits: [Int] = []
     private var lastPublishedLimit: Int = -1
     private var lastPublishAt: Date = .distantPast
-    private var powerdCache: (at: Date, value: Int?)?
+    private var powerdCache: (at: Date, value: Int?, explicitNone: Bool)?
     private let powerdLock = NSLock()
     
     public init() {
@@ -295,14 +296,26 @@ public class HardwareBackend {
     /// While on battery, powerd often reports no policy even when a ceiling is saved.
     /// The reading is cached for two seconds so status and the governor share one `pmset`.
     public func powerdSocLimit() -> Int? {
+        cachedCeiling().value
+    }
+    
+    /// True only when `pmset` itself reported that no ceiling is registered.
+    /// A failed or empty capture is not that report.
+    public func powerdReportedNoCeiling() -> Bool {
+        cachedCeiling().explicitNone
+    }
+    
+    private func cachedCeiling() -> (value: Int?, explicitNone: Bool) {
         powerdLock.lock()
         defer { powerdLock.unlock() }
         if let cache = powerdCache, Date().timeIntervalSince(cache.at) < 2 {
-            return cache.value
+            return (cache.value, cache.explicitNone)
         }
-        let value = Self.parsePowerdSocLimits(Self.readPmsetBattlimit()).max()
-        powerdCache = (Date(), value)
-        return value
+        let text = Self.readPmsetBattlimit()
+        let value = Self.parsePowerdSocLimits(text).max()
+        let explicitNone = value == nil && text.contains("No battery level limits set")
+        powerdCache = (Date(), value, explicitNone)
+        return (value, explicitNone)
     }
     
     private func invalidatePowerdCache() {
@@ -312,21 +325,76 @@ public class HardwareBackend {
     }
     
     static func parsePowerdSocLimits(_ text: String) -> [Int] {
+        guard let regex = try? NSRegularExpression(pattern: #"chargeSocLimitSoc\s*=\s*(\d{1,3})"#) else {
+            return []
+        }
+        let range = NSRange(text.startIndex..., in: text)
         var values: [Int] = []
-        for raw in text.split(separator: "\n") {
-            let line = raw.trimmingCharacters(in: .whitespaces)
-            guard let range = line.range(of: "chargeSocLimitSoc") else { continue }
-            let tail = line[range.upperBound...]
-            let digits = tail.filter(\.isNumber)
-            if let value = Int(digits), (1...100).contains(value) {
-                values.append(value)
-            }
+        regex.enumerateMatches(in: text, range: range) { match, _, _ in
+            guard let match, match.numberOfRanges > 1,
+                  let valueRange = Range(match.range(at: 1), in: text),
+                  let value = Int(text[valueRange]),
+                  (1...100).contains(value) else { return }
+            values.append(value)
         }
         return values
     }
     
+    /// powerd's registered ceilings. Stdout and stderr are read separately:
+    /// a shared pipe under launchd came back empty, and an empty capture is
+    /// not the same thing as "No battery level limits set". If the direct
+    /// read has no ceiling, ask again as the console user.
     private static func readPmsetBattlimit() -> String {
-        runCommand("/usr/bin/pmset", ["-g", "battlimit"]).output
+        let direct = runCommand("/usr/bin/pmset", ["-g", "battlimit"])
+        if !parsePowerdSocLimits(direct.output).isEmpty {
+            return direct.output
+        }
+        if let uid = consoleUserID() {
+            let bounced = runCommand("/bin/launchctl", ["asuser", String(uid), "/usr/bin/pmset", "-g", "battlimit"])
+            if !parsePowerdSocLimits(bounced.output).isEmpty {
+                return bounced.output
+            }
+            logBattlimitRead(direct: direct, bounced: bounced, uid: uid)
+            return direct.output.isEmpty ? bounced.output : direct.output
+        }
+        logBattlimitRead(direct: direct, bounced: nil, uid: nil)
+        return direct.output
+    }
+    
+    private static let battlimitLogLock = NSLock()
+    private static var didLogBattlimitRead = false
+    
+    /// One line in the daemon log when neither read shows a ceiling, so a
+    /// LaunchDaemon that cannot see powerd does not fail silently.
+    private static func logBattlimitRead(
+        direct: (status: Int32, output: String),
+        bounced: (status: Int32, output: String)?,
+        uid: uid_t?
+    ) {
+        battlimitLogLock.lock()
+        defer { battlimitLogLock.unlock() }
+        guard !didLogBattlimitRead else { return }
+        didLogBattlimitRead = true
+        func flat(_ text: String) -> String {
+            String(text.prefix(180)).replacingOccurrences(of: "\n", with: " ")
+        }
+        let bouncedText = bounced.map { " asuser=\($0.status):\(flat($0.output))" } ?? ""
+        let uidText = uid.map(String.init) ?? "none"
+        fputs("pmset battlimit unreadable direct=\(direct.status):\(flat(direct.output))\(bouncedText) console=\(uidText)\n", stdout)
+        fflush(stdout)
+    }
+    
+    private static func consoleUserID() -> uid_t? {
+        var info = stat()
+        guard stat("/dev/console", &info) == 0 else { return nil }
+        let uid = info.st_uid
+        guard uid != 0 else { return nil }
+        return uid
+    }
+    
+    private final class CommandOutput: @unchecked Sendable {
+        var out = Data()
+        var err = Data()
     }
     
     @discardableResult
@@ -334,17 +402,38 @@ public class HardwareBackend {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)
         process.arguments = args
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+        process.standardInput = FileHandle.nullDevice
+        var environment = ProcessInfo.processInfo.environment
+        if environment["PATH"]?.isEmpty != false {
+            environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+        }
+        process.environment = environment
         do {
             try process.run()
-            process.waitUntilExit()
         } catch {
             return (-1, "")
         }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        return (process.terminationStatus, String(data: data, encoding: .utf8) ?? "")
+        let box = CommandOutput()
+        let group = DispatchGroup()
+        group.enter()
+        DispatchQueue.global(qos: .utility).async {
+            box.out = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+            group.leave()
+        }
+        group.enter()
+        DispatchQueue.global(qos: .utility).async {
+            box.err = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+            group.leave()
+        }
+        process.waitUntilExit()
+        group.wait()
+        let data = box.out + box.err
+        let text = String(data: data, encoding: .utf8) ?? String(decoding: data, as: UTF8.self)
+        return (process.terminationStatus, text)
     }
     
     private func applyPowerUILimit(_ requested: Int) -> Bool {

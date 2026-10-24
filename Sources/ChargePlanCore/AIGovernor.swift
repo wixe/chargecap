@@ -146,6 +146,11 @@ public class AIGovernor {
             state.isChargingInhibited = target < 100
             return
         }
+        // A failed pmset read is not proof that the ceiling is gone. Republishing
+        // on that signal rewrites the preference and hangs up PowerUIAgent forever.
+        if enforced == nil && !hardware.powerdReportedNoCeiling() {
+            return
+        }
         let now = Date()
         guard now.timeIntervalSince(lastReassertAt) >= Self.ceilingReassertInterval else { return }
         lastReassertAt = now
